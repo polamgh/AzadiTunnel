@@ -6,9 +6,71 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A10001012FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10002032FCFF95000D0A30A /* tun2socks in Frameworks */ = {isa = PBXBuildFile; productRef = A10002022FCFF95000D0A30A /* tun2socks */; };
+		A10006012FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; };
+		A10006032FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A10003012FCFF95000D0A30A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C3594352FCFF94200D0A30A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000012FCFF95000D0A30A;
+			remoteInfo = AzadiTunnelPacketTunnel;
+		};
+		A10003042FCFF95000D0A30A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2C3594352FCFF94200D0A30A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2C35943C2FCFF94200D0A30A;
+			remoteInfo = AzadiTunnel;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		A10004012FCFF95000D0A30A /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				A10001012FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10006022FCFF95000D0A30A /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				A10006032FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AzadiTunnel.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AzadiTunnelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AzadiTunnelPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PsiphonTunnelCore.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A10005022FCFF95000D0A30A /* Exceptions for "AzadiTunnelPacketTunnel" folder in "AzadiTunnelPacketTunnel" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A10000012FCFF95000D0A30A /* AzadiTunnelPacketTunnel */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		2C35943F2FCFF94200D0A30A /* AzadiTunnel */ = {
@@ -16,10 +78,44 @@
 			path = AzadiTunnel;
 			sourceTree = "<group>";
 		};
+		A10000602FCFF95000D0A30A /* AzadiTunnelShared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AzadiTunnelShared;
+			sourceTree = "<group>";
+		};
+		A10000612FCFF95000D0A30A /* AzadiTunnelPacketTunnel */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A10005022FCFF95000D0A30A /* Exceptions for "AzadiTunnelPacketTunnel" folder in "AzadiTunnelPacketTunnel" target */,
+			);
+			path = AzadiTunnelPacketTunnel;
+			sourceTree = "<group>";
+		};
+		A10000622FCFF95000D0A30A /* AzadiTunnelUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AzadiTunnelUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		2C35943A2FCFF94200D0A30A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000122FCFF95000D0A30A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10006012FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Frameworks */,
+				A10002032FCFF95000D0A30A /* tun2socks in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000222FCFF95000D0A30A /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +129,10 @@
 			isa = PBXGroup;
 			children = (
 				2C35943F2FCFF94200D0A30A /* AzadiTunnel */,
+				A10000592FCFF95000D0A30A /* Vendor */,
+				A10000602FCFF95000D0A30A /* AzadiTunnelShared */,
+				A10000612FCFF95000D0A30A /* AzadiTunnelPacketTunnel */,
+				A10000622FCFF95000D0A30A /* AzadiTunnelUITests */,
 				2C35943E2FCFF94200D0A30A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,8 +141,18 @@
 			isa = PBXGroup;
 			children = (
 				2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */,
+				A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */,
+				A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A10000592FCFF95000D0A30A /* Vendor */ = {
+			isa = PBXGroup;
+			children = (
+				A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */,
+			);
+			path = Vendor;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -55,13 +165,17 @@
 				2C3594392FCFF94200D0A30A /* Sources */,
 				2C35943A2FCFF94200D0A30A /* Frameworks */,
 				2C35943B2FCFF94200D0A30A /* Resources */,
+				A10006022FCFF95000D0A30A /* Embed Frameworks */,
+				A10004012FCFF95000D0A30A /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				A10003022FCFF95000D0A30A /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				2C35943F2FCFF94200D0A30A /* AzadiTunnel */,
+				A10000602FCFF95000D0A30A /* AzadiTunnelShared */,
 			);
 			name = AzadiTunnel;
 			packageProductDependencies = (
@@ -69,6 +183,51 @@
 			productName = AzadiTunnel;
 			productReference = 2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */;
 			productType = "com.apple.product-type.application";
+		};
+		A10000012FCFF95000D0A30A /* AzadiTunnelPacketTunnel */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000482FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelPacketTunnel" */;
+			buildPhases = (
+				A10000112FCFF95000D0A30A /* Sources */,
+				A10000122FCFF95000D0A30A /* Frameworks */,
+				A10000132FCFF95000D0A30A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				A10000602FCFF95000D0A30A /* AzadiTunnelShared */,
+				A10000612FCFF95000D0A30A /* AzadiTunnelPacketTunnel */,
+			);
+			name = AzadiTunnelPacketTunnel;
+			packageProductDependencies = (
+				A10002022FCFF95000D0A30A /* tun2socks */,
+			);
+			productName = AzadiTunnelPacketTunnel;
+			productReference = A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A10000022FCFF95000D0A30A /* AzadiTunnelUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000492FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelUITests" */;
+			buildPhases = (
+				A10000212FCFF95000D0A30A /* Sources */,
+				A10000222FCFF95000D0A30A /* Frameworks */,
+				A10000232FCFF95000D0A30A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A10003032FCFF95000D0A30A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000622FCFF95000D0A30A /* AzadiTunnelUITests */,
+			);
+			name = AzadiTunnelUITests;
+			productName = AzadiTunnelUITests;
+			productReference = A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
 
@@ -82,6 +241,18 @@
 				TargetAttributes = {
 					2C35943C2FCFF94200D0A30A = {
 						CreatedOnToolsVersion = 26.5;
+						SystemCapabilities = {
+							com.apple.InAppPurchase = {
+								enabled = 1;
+							};
+						};
+					};
+					A10000012FCFF95000D0A30A = {
+						CreatedOnToolsVersion = 26.5;
+					};
+					A10000022FCFF95000D0A30A = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 2C35943C2FCFF94200D0A30A;
 					};
 				};
 			};
@@ -94,18 +265,37 @@
 			);
 			mainGroup = 2C3594342FCFF94200D0A30A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2C35943E2FCFF94200D0A30A /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
 				2C35943C2FCFF94200D0A30A /* AzadiTunnel */,
+				A10000012FCFF95000D0A30A /* AzadiTunnelPacketTunnel */,
+				A10000022FCFF95000D0A30A /* AzadiTunnelUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		2C35943B2FCFF94200D0A30A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000132FCFF95000D0A30A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000232FCFF95000D0A30A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +312,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000112FCFF95000D0A30A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000212FCFF95000D0A30A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		A10003022FCFF95000D0A30A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000012FCFF95000D0A30A /* AzadiTunnelPacketTunnel */;
+			targetProxy = A10003012FCFF95000D0A30A /* PBXContainerItemProxy */;
+		};
+		A10003032FCFF95000D0A30A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2C35943C2FCFF94200D0A30A /* AzadiTunnel */;
+			targetProxy = A10003042FCFF95000D0A30A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		2C3594462FCFF94400D0A30A /* Debug */ = {
@@ -178,7 +395,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -236,7 +453,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -251,16 +468,21 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AzadiTunnel/AzadiTunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Azadi Tunnel";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -283,16 +505,20 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = AzadiTunnel/AzadiTunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 4QF88W2GKT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Azadi Tunnel";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -307,6 +533,112 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A100004A2FCFF95000D0A30A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AzadiTunnelPacketTunnel/AzadiTunnelPacketTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_BITCODE = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Vendor/PsiphonTunnelCore.xcframework/**",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AzadiTunnelPacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-Wl,-no_warn_duplicate_libraries",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnel.PacketTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRIP_BITCODE_FROM_COPIED_FILES = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A100004B2FCFF95000D0A30A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = AzadiTunnelPacketTunnel/AzadiTunnelPacketTunnel.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_BITCODE = NO;
+				FRAMEWORK_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/Vendor/PsiphonTunnelCore.xcframework/**",
+				);
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AzadiTunnelPacketTunnel/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnel.PacketTunnel;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRIP_BITCODE_FROM_COPIED_FILES = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A100004C2FCFF95000D0A30A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_MAIN_THREAD_CHECKER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					StoreKitTest,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnelUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AzadiTunnel;
+			};
+			name = Debug;
+		};
+		A100004D2FCFF95000D0A30A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_MAIN_THREAD_CHECKER = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					StoreKitTest,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnelUITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AzadiTunnel;
 			};
 			name = Release;
 		};
@@ -331,7 +663,44 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A10000482FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelPacketTunnel" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100004A2FCFF95000D0A30A /* Debug */,
+				A100004B2FCFF95000D0A30A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000492FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100004C2FCFF95000D0A30A /* Debug */,
+				A100004D2FCFF95000D0A30A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/zhuhaow/tun2socks";
+			requirement = {
+				kind = revision;
+				revision = 78294d5bff7f81152af64a2b66ffbfe917e1183b;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10002022FCFF95000D0A30A /* tun2socks */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */;
+			productName = tun2socks;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2C3594352FCFF94200D0A30A /* Project object */;
 }

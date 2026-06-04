@@ -1,0 +1,104 @@
+import Foundation
+
+/// User-facing settings (Android parity). Persisted in App Group; logged on change without secrets.
+struct AppSettings: Codable, Equatable {
+    var egressRegion: String = ""
+    var upstreamProxyEnabled: Bool = false
+    var upstreamProxyHost: String = ""
+    var upstreamProxyPort: Int = 8080
+    var upstreamProxyUseSystem: Bool = false
+    var upstreamProxyUsername: String = ""
+    var upstreamProxyPassword: String = ""
+    var protocolSelection: ProtocolSelection = .auto
+    /// Shiro `conduitModePreference`: auto / shirokhorshid / public (default public for fast Conduit connect).
+    var conduitMode: ConduitMode = .publicOnly
+    /// After auto-mode timeout, Shiro omits personal compartment (public conduits only).
+    var conduitFallbackToPublic: Bool = false
+    /// Shiro `conduitTimeoutPreference` default (seconds) before auto → public fallback.
+    var conduitTimeoutSeconds: Int = 180
+    /// Shiro `rejectCensoredCountryProxiesPreference` — block IR/CN/RU/etc. conduit peers.
+    var rejectCensoredCountryProxies: Bool = true
+    /// Shiro `cdnFrontingCustomIpListPreference` — extra edge IPs/CIDRs for scan + overrides.
+    var cdnFrontingCustomIpList: String = ""
+    /// Shiro `cdnFrontingCustomSniPreference` — extra SNI hostnames for scan + edge overrides.
+    var cdnFrontingCustomSni: String = ""
+    /// Shiro always sets `FrontedMeekCDNScanUseBuiltInSpec` true; toggle disables built-in scan spec.
+    var cdnFrontingUseBuiltInScan: Bool = true
+    var beastModeEnabled: Bool = true
+    /// When enabled (and not Conduit), connect tries CDN → Auto+Beast → Direct with timeouts.
+    var smartFallbackChainEnabled: Bool = true
+    var fallbackTimeoutCDN: TimeInterval = 120
+    var fallbackTimeoutAutoBeast: TimeInterval = 120
+    var fallbackTimeoutDirect: TimeInterval = 120
+    var disableTimeouts: Bool = false
+    var autoReconnect: Bool = true
+    var connectOnLaunch: Bool = false
+    /// iOS VPN On Demand — applied to NETunnelProviderManager (not only Settings app).
+    var vpnOnDemandEnabled: Bool = false
+    var vpnOnDemandMode: VPNOnDemandMode = .always
+    var preferredLanguage: AppLanguage = .system
+    var hasAcceptedVPNDisclosure: Bool = false
+    /// First-connection legal disclaimer (persisted in App Group settings JSON).
+    var hasAcceptedConnectionDisclaimer: Bool = false
+    var hasCompletedOnboarding: Bool = false
+    /// First-launch language picker completed (English or Persian chosen explicitly).
+    var hasChosenLanguage: Bool = false
+
+    enum ConduitMode: String, Codable, CaseIterable, Identifiable {
+        case auto
+        case shiroCommunity = "shirokhorshid"
+        case publicOnly = "public"
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .auto: return "Auto (community then public)"
+            case .shiroCommunity: return "Community"
+            case .publicOnly: return "Public"
+            }
+        }
+    }
+
+    enum ProtocolSelection: String, Codable, CaseIterable, Identifiable {
+        case auto
+        case direct
+        case cdnFronting
+        case conduit
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .auto: return "Auto"
+            case .direct: return "Direct"
+            case .cdnFronting: return "CDN fronting"
+            case .conduit: return "Conduit"
+            }
+        }
+    }
+
+    enum VPNOnDemandMode: String, Codable, CaseIterable, Identifiable {
+        case always
+        case wifi
+        case cellular
+
+        var id: String { rawValue }
+    }
+
+    enum AppLanguage: String, Codable, CaseIterable, Identifiable {
+        case system
+        case english = "en"
+        case persian = "fa"
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .system: return "System"
+            case .english: return "English"
+            case .persian: return "فارسی"
+            }
+        }
+    }
+}

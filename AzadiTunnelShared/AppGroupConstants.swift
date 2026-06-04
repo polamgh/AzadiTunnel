@@ -1,0 +1,80 @@
+import Foundation
+
+enum AppGroupConstants {
+    static let suiteName = "group.com.polamgh.ali.AzadiTunnel"
+    static let psiphonConfigKey = "psiphon_config_json"
+    static let psiphonConfigBaseKey = "psiphon_config_base_json"
+    static let psiphonServerEntriesKey = "psiphon_server_entries"
+    static let psiphonServerEntriesLineCountKey = "psiphon_server_entries_line_count"
+    static let psiphonServerEntriesFileName = "psiphon-embedded-server-entries.txt"
+    static let psiphonBootstrapInstalledKey = "psiphon_bootstrap_installed"
+    static let psiphonBootstrapVersionKey = "psiphon_bootstrap_app_version"
+    static let psiphonUsesBundledConfigKey = "psiphon_uses_bundled_config"
+    static let appSettingsKey = "app_settings_json"
+    static let sharedLogsKey = "shared_logs"
+    static let vpnStatusKey = "vpn_status"
+    static let testModeKey = "ui_test_mode"
+    static let lastInternetTestOKKey = "last_internet_test_ok"
+    static let psiphonTunnelEstablishedKey = "psiphon_tunnel_established"
+}
+
+enum SharedLogEvent: String, CaseIterable {
+    case appBoot = "APP_BOOT"
+    case vpnConnectRequested = "VPN_CONNECT_REQUESTED"
+    case vpnDisconnectRequested = "VPN_DISCONNECT_REQUESTED"
+    case vpnStatusChanged = "VPN_STATUS_CHANGED"
+    case extensionBoot = "EXTENSION_BOOT"
+    case extensionStartEntered = "EXTENSION_START_ENTERED"
+    case extensionStopEntered = "EXTENSION_STOP_ENTERED"
+    case extensionSettingsLoaded = "EXTENSION_SETTINGS_LOADED"
+    case vpnManagerCreated = "VPN_MANAGER_CREATED"
+    case vpnManagerReused = "VPN_MANAGER_REUSED"
+    case vpnManagerSaved = "VPN_MANAGER_SAVED"
+    case vpnStartRequested = "VPN_START_REQUESTED"
+    case vpnStopRequested = "VPN_STOP_REQUESTED"
+    case configImportOpened = "CONFIG_IMPORT_OPENED"
+    case configValidateOK = "CONFIG_VALIDATE_OK"
+    case configValidateFailed = "CONFIG_VALIDATE_FAILED"
+    case configSaved = "CONFIG_SAVED"
+    case psiphonConfigFound = "PSIPHON_CONFIG_FOUND"
+    case psiphonConfigInstalled = "PSIPHON_CONFIG_INSTALLED"
+    case psiphonBundledConfigFound = "PSIPHON_BUNDLED_CONFIG_FOUND"
+    case psiphonBundledConfigInstallFailed = "PSIPHON_BUNDLED_CONFIG_INSTALL_FAILED"
+    case psiphonBundledConfigInstalled = "PSIPHON_BUNDLED_CONFIG_INSTALLED"
+    case psiphonServerEntriesLoaded = "PSIPHON_SERVER_ENTRIES_LOADED"
+    case psiphonConnectUsingBundledConfig = "PSIPHON_CONNECT_USING_BUNDLED_CONFIG"
+    case psiphonCoreSelected = "PSIPHON_CORE_SELECTED"
+    case psiphonConfigValid = "PSIPHON_CONFIG_VALID"
+    case psiphonConnectRequested = "PSIPHON_CONNECT_REQUESTED"
+    case psiphonConnected = "PSIPHON_CONNECTED"
+    case psiphonDisconnected = "PSIPHON_DISCONNECTED"
+    case psiphonConnectFailed = "PSIPHON_CONNECT_FAILED"
+    case psiphonStartRequested = "PSIPHON_START_REQUESTED"
+    case psiphonStarted = "PSIPHON_STARTED"
+    case psiphonLocalProxy = "PSIPHON_LOCAL_PROXY"
+    case psiphonStartFailed = "PSIPHON_START_FAILED"
+    case psiphonStopRequested = "PSIPHON_STOP_REQUESTED"
+    case psiphonStopped = "PSIPHON_STOPPED"
+    case coreSelected = "CORE_SELECTED"
+    case psiphonProxyReady = "PSIPHON_PROXY_READY"
+    case psiphonTunnelEstablished = "PSIPHON_TUNNEL_ESTABLISHED"
+    case packetForwardingStartRequested = "PACKET_FORWARDING_START_REQUESTED"
+    case packetForwardingStarted = "PACKET_FORWARDING_STARTED"
+    case tunnelConnected = "TUNNEL_CONNECTED"
+    case tunnelStartFailed = "TUNNEL_START_FAILED"
+    case tunnelStopCleanup = "TUNNEL_STOP_CLEANUP"
+    case settingChanged = "SETTING_CHANGED"
+    case internetTestPassed = "INTERNET_TEST_PASSED"
+    case internetTestFailed = "INTERNET_TEST_FAILED"
+    case dnsForwardOk = "DNS_FORWARD_OK"
+    case dnsForwardFailed = "DNS_FORWARD_FAILED"
+    case tcpRelayOk = "TCP_RELAY_OK"
+}
+
+enum VPNStatusDisplay: String, Codable {
+    case disconnected
+    case connecting
+    case connected
+    case disconnecting
+    case error
+}

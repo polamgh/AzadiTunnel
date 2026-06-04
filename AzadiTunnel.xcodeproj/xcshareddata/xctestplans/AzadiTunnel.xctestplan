@@ -1,0 +1,32 @@
+{
+  "configurations" : [
+    {
+      "id" : "AzadiTunnel-Device-Debug",
+      "name" : "Device Debug",
+      "options" : {
+        "parallelizationEnabled" : false,
+        "targetForVariableExpansion" : {
+          "containerPath" : "container:AzadiTunnel.xcodeproj",
+          "identifier" : "2C35943C2FCFF94200D0A30A",
+          "name" : "AzadiTunnel"
+        }
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "codeCoverage" : false,
+    "testExecutionOrdering" : "random",
+    "testTimeoutsEnabled" : false
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:AzadiTunnel.xcodeproj",
+        "identifier" : "A10000022FCFF95000D0A30A",
+        "name" : "AzadiTunnelUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

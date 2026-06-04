@@ -1,0 +1,124 @@
+{
+  "identifier" : "AzadiTunnelStoreKit",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "TIP_SMALL",
+      "localizations" : [
+        {
+          "description" : "Optional one-time support tip. VPN features stay free.",
+          "displayName" : "Small tip",
+          "locale" : "en_CA"
+        }
+      ],
+      "productID" : "azaditunnel.tip.small",
+      "referenceName" : "Small tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "5.99",
+      "familyShareable" : false,
+      "internalID" : "TIP_MEDIUM",
+      "localizations" : [
+        {
+          "description" : "Optional one-time support tip. VPN features stay free.",
+          "displayName" : "Medium tip",
+          "locale" : "en_CA"
+        }
+      ],
+      "productID" : "azaditunnel.tip.medium",
+      "referenceName" : "Medium tip",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "TIP_LARGE",
+      "localizations" : [
+        {
+          "description" : "Optional one-time support tip. VPN features stay free.",
+          "displayName" : "Large tip",
+          "locale" : "en_CA"
+        }
+      ],
+      "productID" : "azaditunnel.tip.large",
+      "referenceName" : "Large tip",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "0",
+    "_developerTeamID" : "STOREKIT_TEST",
+    "_lastSynchronizedDate" : 0,
+    "_storeKitConfigurationFileVersion" : "4.0"
+  },
+  "subscriptionGroups" : [
+    {
+      "id" : "SUPPORT_GROUP",
+      "localizations" : [
+
+      ],
+      "name" : "Support",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "MONTHLY",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Optional monthly support subscription. VPN features stay free.",
+              "displayName" : "Monthly supporter",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "azaditunnel.support.monthly",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Monthly",
+          "subscriptionGroupID" : "SUPPORT_GROUP",
+          "type" : "RecurringSubscription"
+        },
+        {
+          "adHocOffers" : [
+
+          ],
+          "codeOffers" : [
+
+          ],
+          "displayPrice" : "49.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "YEARLY",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Optional yearly support subscription. VPN features stay free.",
+              "displayName" : "Yearly supporter",
+              "locale" : "en_CA"
+            }
+          ],
+          "productID" : "azaditunnel.support.yearly",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Yearly",
+          "subscriptionGroupID" : "SUPPORT_GROUP",
+          "type" : "RecurringSubscription"
+        }
+      ]
+    }
+  ],
+  "version" : {
+    "major" : 4,
+    "minor" : 0
+  }
+}

@@ -1,0 +1,24 @@
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Local Psiphon configs (secrets) — never commit
+Tests/Fixtures/local-*.json
+AzadiTunnel/Resources/Bundled/psiphon-config.local.json
+AzadiTunnel/Resources/Bundled/cdn-fronting.local.json
+AzadiTunnel/Resources/Bundled/psiphon-embedded-server-entries.local.txt
+AzadiTunnel/Resources/Bundled/psiphon-embedded-server-entries.remote-supplement.txt
+Tooling/psiphon/remote-server-list-urls.json
+
+# Vendored build artifacts (built by script)
+Vendor/PsiphonTunnelCore.xcframework/
+Tooling/psiphon/build/
+Tooling/psiphon/build/shiro-apk/
+
+# Psiphon data during dev
+.psiphon-data/
+
+# Local device/CI test output (may contain diagnostics)
+Tooling/test-logs/
+DerivedDataForCI/

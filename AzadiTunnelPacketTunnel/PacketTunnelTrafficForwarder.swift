@@ -1,0 +1,185 @@
+import Foundation
+import Network
+import NetworkExtension
+
+#if canImport(tun2socks)
+import tun2socks
+#endif
+
+/// Forwards packets from `NEPacketTunnelFlow` through Psiphon's local proxy.
+/// SOCKS: tun2socks (TCP). HTTP: tunnel proxy settings + packet pump.
+final class PacketTunnelTrafficForwarder {
+    private static var tunTcpSeen = 0
+
+    private let packetFlow: NEPacketTunnelFlow
+    private let socksHost: String
+    private let socksPort: Int
+    private let httpPort: Int
+    private let proxyType: PsiphonLocalProxyType
+    private var cancelled = false
+
+#if canImport(tun2socks)
+    private var stackReady = false
+    /// Must outlive TSIPStack — its `delegate` is weak.
+    private var socksStackDelegate: SocksTun2SocksDelegate?
+#endif
+
+    init(
+        packetFlow: NEPacketTunnelFlow,
+        socksHost: String,
+        socksPort: Int,
+        httpPort: Int,
+        proxyType: PsiphonLocalProxyType
+    ) {
+        self.packetFlow = packetFlow
+        self.socksHost = socksHost
+        self.socksPort = socksPort
+        self.httpPort = httpPort
+        self.proxyType = proxyType
+    }
+
+    func start() throws {
+        switch proxyType {
+        case .socks, .dual:
+            try startSocksForwarding()
+        case .http:
+            startHttpPump()
+        case .unknown:
+            throw PsiphonTunnelCoreError.proxyNotReady
+        }
+    }
+
+    func stop() {
+        cancelled = true
+#if canImport(tun2socks)
+        socksStackDelegate = nil
+        TSIPStack.stack.processQueue.sync {
+            TSIPStack.stack.suspendTimer()
+            TSIPStack.stack.delegate = nil
+        }
+#endif
+    }
+
+    private func startHttpPump() {
+        scheduleReadLoop { _, _ in }
+    }
+
+    private func startSocksForwarding() throws {
+#if canImport(tun2socks)
+        let stack = TSIPStack.stack
+        stack.processQueue.sync {
+            stack.outputBlock = { [weak self] packets, protocols in
+                guard let self, !self.cancelled else { return }
+                let up = packets.reduce(0) { $0 + $1.count }
+                if up > 0 {
+                    TunnelStatisticsStore.recordPacketBytes(down: 0, up: up)
+                }
+                self.packetFlow.writePackets(packets, withProtocols: protocols)
+            }
+            let delegate = SocksTun2SocksDelegate(socksHost: self.socksHost, socksPort: self.socksPort)
+            self.socksStackDelegate = delegate
+            stack.delegate = delegate
+            stack.resumeTimer()
+            self.stackReady = true
+            SharedLogger.shared.logRaw(
+                "TUN2SOCKS_READY",
+                detail: "delegate=\(stack.delegate != nil)"
+            )
+        }
+        scheduleReadLoop { packets, _ in
+            TSIPStack.stack.processQueue.async {
+                for packet in packets {
+                    TSIPStack.stack.received(packet: packet)
+                }
+            }
+        }
+#else
+        throw PsiphonTunnelCoreError.startFailed("tun2socks package not linked; cannot forward SOCKS traffic")
+#endif
+    }
+
+    private func scheduleReadLoop(handler: @escaping ([Data], [NSNumber]) -> Void) {
+        guard !cancelled else { return }
+        packetFlow.readPackets { [weak self] packets, protocols in
+            guard let self, !self.cancelled else { return }
+
+            var tcpPackets: [Data] = []
+            var tcpProtocols: [NSNumber] = []
+            tcpPackets.reserveCapacity(packets.count)
+            tcpProtocols.reserveCapacity(protocols.count)
+
+            for (packet, proto) in zip(packets, protocols) {
+                guard packet.count >= 1 else { continue }
+                let version = packet[0] >> 4
+                if version == 6 {
+                    continue
+                }
+                guard version == 4 else { continue }
+
+                if packet.count >= 20, packet[9] == 6 {
+                    Self.tunTcpSeen += 1
+                    if Self.tunTcpSeen <= 5 || Self.tunTcpSeen % 50 == 0 {
+                        SharedLogger.shared.logRaw("TUN_TCP_PKT", detail: "n=\(Self.tunTcpSeen) len=\(packet.count)")
+                    }
+                }
+
+                let down = packet.count
+                if down > 0 {
+                    TunnelStatisticsStore.recordPacketBytes(down: down, up: 0)
+                }
+                if TunnelDnsForwarder.handleIfDnsQuery(
+                    packet: packet,
+                    protocolNumber: proto,
+                    packetFlow: self.packetFlow,
+                    socksHost: self.socksHost,
+                    socksPort: self.socksPort,
+                    httpPort: self.httpPort
+                ) {
+                    continue
+                }
+                tcpPackets.append(packet)
+                tcpProtocols.append(proto)
+            }
+
+            if !tcpPackets.isEmpty {
+                handler(tcpPackets, tcpProtocols)
+            }
+            self.scheduleReadLoop(handler: handler)
+        }
+    }
+}
+
+#if canImport(tun2socks)
+private final class SocksTun2SocksDelegate: NSObject, TSIPStackDelegate {
+    private let socksHost: String
+    private let socksPort: Int
+
+    init(socksHost: String, socksPort: Int) {
+        self.socksHost = socksHost
+        self.socksPort = socksPort
+    }
+
+    func didAcceptTCPSocket(_ sock: TSTCPSocket) {
+        guard SOCKS5RelayGate.tryAcquire() else {
+            sock.reset()
+            return
+        }
+        // lwIP pcb: local_ip:local_port is the internet peer; remote_ip is the TUN client.
+        var peer = sock.destinationAddress
+        let peerPort = sock.destinationPort
+        let peerIP = String(cString: inet_ntoa(peer))
+        if peerIP.hasPrefix("149.154.") || peerIP.hasPrefix("91.108.") {
+            SharedLogger.shared.logRaw("TUN_SOCKS_ACCEPT", detail: "telegram=\(peerIP):\(peerPort)")
+        }
+        let session = SOCKS5TunnelSession(
+            tcpSocket: sock,
+            proxyHost: socksHost,
+            proxyPort: socksPort,
+            destination: peer,
+            destinationPort: peerPort
+        )
+        sock.delegate = session
+        session.start()
+    }
+}
+#endif

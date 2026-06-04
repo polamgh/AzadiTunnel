@@ -1,0 +1,14 @@
+{
+  "originHash" : "2665f24341c9e7f0a5c664b09082a308e92dc699e24b5c4cfb03415cb525d05b",
+  "pins" : [
+    {
+      "identity" : "tun2socks",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/zhuhaow/tun2socks",
+      "state" : {
+        "revision" : "78294d5bff7f81152af64a2b66ffbfe917e1183b"
+      }
+    }
+  ],
+  "version" : 3
+}

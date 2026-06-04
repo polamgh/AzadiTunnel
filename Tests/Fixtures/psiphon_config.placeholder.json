@@ -1,0 +1,9 @@
+{
+  "ClientVersion": "1",
+  "PropagationChannelId": "YOUR_PROPAGATION_CHANNEL_ID",
+  "SponsorId": "YOUR_SPONSOR_ID",
+  "RemoteServerListSignaturePublicKey": "YOUR_REMOTE_SERVER_LIST_SIGNATURE_PUBLIC_KEY",
+  "RemoteServerListURLs": [
+    "https://example.invalid/psiphon/server-list"
+  ]
+}

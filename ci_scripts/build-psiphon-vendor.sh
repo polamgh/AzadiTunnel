@@ -15,13 +15,20 @@ log "REPO_ROOT=${REPO_ROOT}"
 
 GO_INSTALL_ROOT="${HOME}/.xcode-cloud/go"
 GO_ROOT="${GO_INSTALL_ROOT}/go"
+# Must match MobileLibrary/iOS/build-psiphon-framework.sh GO_VERSION_REQUIRED.
+GO_VERSION_REQUIRED="1.26.3"
 
-install_go_1_26() {
-  if command -v go >/dev/null 2>&1 && go version 2>/dev/null | grep -qE 'go1\.26'; then
-    export GOROOT="$(go env GOROOT)"
-    export PATH="$(go env GOROOT)/bin:${PATH}"
-    log "Go already installed: $(go version)"
-    return 0
+install_go_required() {
+  if command -v go >/dev/null 2>&1; then
+    local installed
+    installed="$(go version | sed -E -n 's/.*go([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+    if [[ "${installed}" == "${GO_VERSION_REQUIRED}" ]]; then
+      export GOROOT="$(go env GOROOT)"
+      export PATH="${GOROOT}/bin:${PATH}"
+      log "Go already installed: $(go version)"
+      return 0
+    fi
+    log "Found go ${installed:-unknown}; need ${GO_VERSION_REQUIRED}"
   fi
 
   ARCH="$(uname -m)"
@@ -31,10 +38,9 @@ install_go_1_26() {
     *) log "Unsupported macOS arch: ${ARCH}"; exit 1 ;;
   esac
 
-  GO_VERSION="1.26.0"
-  GO_TAR="go${GO_VERSION}.darwin-${GO_ARCH}.tar.gz"
+  GO_TAR="go${GO_VERSION_REQUIRED}.darwin-${GO_ARCH}.tar.gz"
 
-  log "Installing Go ${GO_VERSION} (${GO_ARCH}) to ${GO_ROOT} ..."
+  log "Installing Go ${GO_VERSION_REQUIRED} (${GO_ARCH}) to ${GO_ROOT} ..."
   mkdir -p "${GO_INSTALL_ROOT}"
   curl -fsSL "https://go.dev/dl/${GO_TAR}" -o "/tmp/${GO_TAR}"
   rm -rf "${GO_ROOT}"
@@ -42,10 +48,12 @@ install_go_1_26() {
   export GOROOT="${GO_ROOT}"
   export PATH="${GO_ROOT}/bin:${PATH}"
 
-  go version | grep -qE 'go1\.26' || {
-    log "Go 1.26 install failed"
+  local installed
+  installed="$(go version | sed -E -n 's/.*go([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+  if [[ "${installed}" != "${GO_VERSION_REQUIRED}" ]]; then
+    log "Go install failed: expected ${GO_VERSION_REQUIRED}, got ${installed:-none} ($(go version 2>/dev/null || echo missing))"
     exit 1
-  }
+  fi
   log "Go ready: $(go version)"
 }
 
@@ -54,7 +62,7 @@ if [[ -d "${REPO_ROOT}/Vendor/PsiphonTunnelCore.xcframework/ios-arm64/PsiphonTun
   exit 0
 fi
 
-install_go_1_26
+install_go_required
 export GOROOT="${GOROOT:-$(go env GOROOT)}"
 export PATH="${GOROOT}/bin:${PATH}"
 

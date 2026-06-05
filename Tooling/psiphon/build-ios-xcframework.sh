@@ -34,7 +34,12 @@ export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin:${PA
 which go >/dev/null
 export GOROOT="$(go env GOROOT)"
 export PATH="${GOROOT}/bin:${PATH}"
-go version | grep -qE 'go1\.26' || { echo "Go 1.26.x required (GOROOT=${GOROOT})"; exit 1; }
+GO_VERSION_REQUIRED="1.26.3"
+GO_VERSION="$(go version | sed -E -n 's/.*go([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+if [[ "${GO_VERSION}" != "${GO_VERSION_REQUIRED}" ]]; then
+  echo "Go ${GO_VERSION_REQUIRED} required (GOROOT=${GOROOT}); got ${GO_VERSION:-unknown}"
+  exit 1
+fi
 
 # shirokhorshid/psiphon-tunnel-core: in-proxy is ON by default (!PSIPHON_DISABLE_INPROXY).
 # PSIPHON_ENABLE_INPROXY does not exist in this fork (Shiro Android CI tag is a no-op here).

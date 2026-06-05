@@ -51,7 +51,7 @@ Runs all UI tests including `testHomeConnectRealInternetAndTraffic` and `testAll
 
 | Script | When | Purpose |
 |--------|------|---------|
-| `ci_scripts/ci_post_clone.sh` | After git clone | Install Go 1.26, `verify-protocol-parity.py`, build `Vendor/PsiphonTunnelCore.xcframework` |
+| `ci_scripts/ci_post_clone.sh` | After git clone | Install Go **1.26.3** (must match tunnel-core build script), `verify-protocol-parity.py`, build `Vendor/PsiphonTunnelCore.xcframework` |
 | `ci_scripts/ci_pre_xcodebuild.sh` | Before `xcodebuild` | Verify framework + bundled Psiphon resources |
 
 Scripts must be **committed to git** with the executable bit (`git update-index --chmod=+x ci_scripts/*.sh`). Xcode Cloud only runs scripts that exist in the cloned repository beside `AzadiTunnel.xcodeproj`.

@@ -4,6 +4,11 @@ set -euo pipefail
 
 log() { echo "[ci_post_clone] $*"; }
 
+on_err() {
+  log "FAILED at line ${1} (exit ${2}). See log above for [build-psiphon-vendor] / go version mismatch."
+}
+trap 'on_err ${LINENO} $?' ERR
+
 # Xcode Cloud runs scripts with cwd = ci_scripts/. Use Apple's env var when set.
 if [[ -n "${CI_PRIMARY_REPOSITORY_PATH:-}" ]]; then
   REPO_ROOT="${CI_PRIMARY_REPOSITORY_PATH}"

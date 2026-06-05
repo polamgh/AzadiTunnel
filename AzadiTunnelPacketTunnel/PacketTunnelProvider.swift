@@ -185,12 +185,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
-        SharedLogger.shared.log(.extensionStopEntered)
+        SharedLogger.shared.log(.extensionStopEntered, detail: "reason=\(reason.rawValue)")
+        stopPacketForwarding()
+        TunnelStatisticsStore.markDisconnected()
+        SharedSettingsStore.shared.vpnStatus = .disconnected
+        SharedLogger.shared.log(.tunnelStopCleanup)
+        completionHandler()
+
+        let engineToStop = engine
+        engine = nil
+        guard let engineToStop else { return }
         Task {
-            await cleanup()
-            SharedLogger.shared.log(.tunnelStopCleanup)
-            SharedSettingsStore.shared.vpnStatus = .disconnected
-            completionHandler()
+            await engineToStop.stopWithTimeout(seconds: 10)
+            SharedLogger.shared.log(.psiphonStopped)
         }
     }
 
@@ -219,15 +226,19 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func cleanup() async {
+    private func stopPacketForwarding() {
         connectivityTask?.cancel()
         connectivityTask = nil
         statsTimer?.cancel()
         statsTimer = nil
         forwarder?.stop()
         forwarder = nil
+    }
+
+    private func cleanup() async {
+        stopPacketForwarding()
         if let engine {
-            await engine.stop()
+            await engine.stopWithTimeout(seconds: 10)
         }
         engine = nil
         TunnelStatisticsStore.markDisconnected()

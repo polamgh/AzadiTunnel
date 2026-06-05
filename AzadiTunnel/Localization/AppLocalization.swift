@@ -252,6 +252,9 @@ final class AppLanguageController: ObservableObject {
         case errorConduitBlockedSub
         case errorVPNPermission
         case errorVPNPermissionSub
+        case errorOtherVpnBlocking
+        case errorOtherVpnBlockingSub
+        case openIOSSettings
         case errorPsiphonFailed
         case errorPsiphonFailedSub
         case errorInternetTest

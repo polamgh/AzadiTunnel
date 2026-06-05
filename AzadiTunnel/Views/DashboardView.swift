@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct DashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -28,7 +29,7 @@ struct DashboardView: View {
                     statusHero
                     ConnectPowerButton(
                         status: vpn.status,
-                        isEnabled: configReady || vpn.status == .connected
+                        isEnabled: configReady || vpn.status != .disconnected
                     ) {
                         if !SharedSettingsStore.shared.appSettings.hasAcceptedConnectionDisclaimer {
                             SharedLogger.shared.logRaw("CONNECT_BLOCKED_PENDING_DISCLAIMER", detail: "source=connect_button")
@@ -36,7 +37,8 @@ struct DashboardView: View {
                             return
                         }
                         Task {
-                            if vpn.status == .connected || vpn.status == .connecting {
+                            await vpn.prepareForUserToggle()
+                            if shouldDisconnectOnPowerTap {
                                 await vpn.disconnect()
                             } else {
                                 await vpn.connect()
@@ -512,6 +514,16 @@ struct DashboardView: View {
         }
     }
 
+    /// Disconnect only when our tunnel session is active. Failed → retry connect (not hide the banner).
+    private var shouldDisconnectOnPowerTap: Bool {
+        switch vpn.status {
+        case .connected, .connecting, .disconnecting:
+            return true
+        case .disconnected, .error:
+            return false
+        }
+    }
+
     private var regionTitle: String {
         let r = SharedSettingsStore.shared.appSettings.egressRegion
         return r.isEmpty ? L10n.t(.regionAny) : r
@@ -624,9 +636,23 @@ private struct ErrorBanner: View {
                         .font(.caption)
                         .foregroundStyle(AppTheme.secondaryText(for: colorScheme).opacity(0.85))
                 }
+                if showsOpenSettings {
+                    Button(L10n.t(.openIOSSettings)) {
+                        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                        UIApplication.shared.open(url)
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(AppTheme.iranGreen)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("open_ios_settings_button")
+                }
             }
         }
         .accessibilityIdentifier("error_banner")
+    }
+
+    private var showsOpenSettings: Bool {
+        kind == .otherVpnBlocking || kind == .vpnPermission
     }
 
     private var title: String {
@@ -634,6 +660,7 @@ private struct ErrorBanner: View {
         case .noConfig: return L10n.t(.errorNoConfig)
         case .conduitBlocked: return L10n.t(.errorConduitBlocked)
         case .vpnPermission: return L10n.t(.errorVPNPermission)
+        case .otherVpnBlocking: return L10n.t(.errorOtherVpnBlocking)
         case .psiphonFailed: return L10n.t(.errorPsiphonFailed)
         case .internetTestFailed: return L10n.t(.errorInternetTest)
         case .none: return ""
@@ -645,6 +672,7 @@ private struct ErrorBanner: View {
         case .noConfig: return L10n.t(.errorNoConfigSub)
         case .conduitBlocked: return L10n.t(.errorConduitBlockedSub)
         case .vpnPermission: return L10n.t(.errorVPNPermissionSub)
+        case .otherVpnBlocking: return L10n.t(.errorOtherVpnBlockingSub)
         case .psiphonFailed: return L10n.t(.errorPsiphonFailedSub)
         case .internetTestFailed: return L10n.t(.errorInternetTestSub)
         case .none: return ""

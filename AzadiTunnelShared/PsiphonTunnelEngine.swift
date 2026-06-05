@@ -35,4 +35,27 @@ final class PsiphonTunnelEngine: @unchecked Sendable {
         SharedLogger.shared.log(.psiphonDisconnected)
         await core.stop()
     }
+
+    /// Stop tunnel-core but do not block shutdown longer than `seconds` (Conduit teardown can be slow).
+    func stopWithTimeout(seconds: TimeInterval) async {
+        SharedLogger.shared.log(.psiphonDisconnected)
+        await withTaskGroup(of: Bool.self) { group in
+            group.addTask {
+                await self.core.stop()
+                return true
+            }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(max(1, seconds) * 1_000_000_000))
+                return false
+            }
+            let finishedStop = await group.next() ?? false
+            group.cancelAll()
+            if !finishedStop {
+                SharedLogger.shared.logRaw(
+                    "PSIPHON_STOP_TIMEOUT",
+                    detail: "timeout_s=\(Int(seconds)) action=proceed_tunnel_teardown"
+                )
+            }
+        }
+    }
 }

@@ -7,6 +7,7 @@ enum VPNBannerKind: Equatable {
     case noConfig
     case conduitBlocked
     case vpnPermission
+    case otherVpnBlocking
     case psiphonFailed
     case internetTestFailed
 }
@@ -25,6 +26,8 @@ final class VPNController: ObservableObject {
     private var manager: NETunnelProviderManager?
     private let providerBundleID = "com.polamgh.ali.AzadiTunnel.PacketTunnel"
     private var reconnectTask: Task<Void, Never>?
+    /// User tapped Disconnect — keep UI on Disconnected while iOS tears down the tunnel.
+    private var optimisticDisconnect = false
 
     init() {
         Task { await refreshStatusFromSystem() }
@@ -32,18 +35,20 @@ final class VPNController: ObservableObject {
 
     func refreshStatusFromSystem() async {
         do {
-            let managers = try await NETunnelProviderManager.loadAllFromPreferences()
-            if let existing = managers.first(where: {
-                ($0.protocolConfiguration as? NETunnelProviderProtocol)?.providerBundleIdentifier == providerBundleID
-            }) {
-                manager = existing
-                vpnOnDemandEnabledOnDevice = existing.isOnDemandEnabled
+            manager = try await VPNProfileCoordinator.loadManager()
+            if let manager {
+                vpnOnDemandEnabledOnDevice = manager.isOnDemandEnabled
             }
             updateFromManager()
         } catch {
             lastError = error.localizedDescription
             banner = .vpnPermission
         }
+    }
+
+    /// Refresh NE status before Connect/Disconnect so UI matches iOS when the tunnel died externally.
+    func prepareForUserToggle() async {
+        await refreshStatusFromSystem()
     }
 
     func refreshStatistics() {
@@ -117,17 +122,55 @@ final class VPNController: ObservableObject {
 
         do {
             let mgr = try await ensureManager()
+            if mgr.connection.status == .connected || mgr.connection.status == .connecting {
+                SharedLogger.shared.logRaw(
+                    "VPN_START_RESET_STALE",
+                    detail: "ne_status=\(mgr.connection.status.rawValue)"
+                )
+                mgr.connection.stopVPNTunnel()
+                try? await TaskSleep.milliseconds(500)
+            }
+            optimisticDisconnect = false
             SharedLogger.shared.log(.vpnStartRequested)
-            try mgr.connection.startVPNTunnel()
+            try await startVPNTunnel(on: mgr)
             observeConnection(mgr)
         } catch {
-            lastError = error.localizedDescription
+            handleConnectFailure(error)
+        }
+    }
+
+    private func startVPNTunnel(on mgr: NETunnelProviderManager) async throws {
+        do {
+            try mgr.connection.startVPNTunnel()
+        } catch {
+            guard VPNProfileCoordinator.isConfigurationDisabledError(error) else { throw error }
+            SharedLogger.shared.logRaw("VPN_CONFIG_DISABLED", detail: "action=reenable_and_retry")
+            let settings = SharedSettingsStore.shared.appSettings
+            let repaired = try await VPNProfileCoordinator.ensureEnabled(manager: mgr, settings: settings)
+            manager = repaired
+            try repaired.connection.startVPNTunnel()
+        }
+    }
+
+    private func handleConnectFailure(_ error: Error) {
+        if VPNProfileCoordinator.isConfigurationDisabledError(error) {
+            lastError = nil
             status = .error
             statusMessage = "Failed"
-            banner = .psiphonFailed
+            banner = .otherVpnBlocking
             SharedSettingsStore.shared.vpnStatus = .error
-            SharedLogger.shared.log(.psiphonConnectFailed, detail: "reason=\(error.localizedDescription)")
+            SharedLogger.shared.logRaw(
+                "VPN_OTHER_ACTIVE",
+                detail: "ne_code=2 hint=settings_vpn"
+            )
+            return
         }
+        lastError = error.localizedDescription
+        status = .error
+        statusMessage = "Failed"
+        banner = .psiphonFailed
+        SharedSettingsStore.shared.vpnStatus = .error
+        SharedLogger.shared.log(.psiphonConnectFailed, detail: "reason=\(error.localizedDescription)")
     }
 
     func runPostConnectDiagnostics() async {
@@ -144,12 +187,38 @@ final class VPNController: ObservableObject {
 
     func disconnect() async {
         reconnectTask?.cancel()
+        lastError = nil
+        banner = .none
         SharedLogger.shared.log(.vpnDisconnectRequested)
-        SharedSettingsStore.shared.vpnStatus = .disconnecting
-        status = .disconnecting
-        statusMessage = "Disconnecting…"
-        SharedLogger.shared.log(.vpnStopRequested)
-        manager?.connection.stopVPNTunnel()
+
+        if manager == nil {
+            await refreshStatusFromSystem()
+        }
+
+        let neStatus = manager?.connection.status
+        switch neStatus {
+        case .connected, .connecting, .reasserting, .disconnecting:
+            optimisticDisconnect = true
+            SharedLogger.shared.log(.vpnStopRequested)
+            manager?.connection.stopVPNTunnel()
+        default:
+            optimisticDisconnect = false
+            SharedLogger.shared.logRaw(
+                "VPN_DISCONNECT_NOOP",
+                detail: "ne_status=\(neStatus.map { String($0.rawValue) } ?? "nil") action=clear_local_state"
+            )
+        }
+
+        if let mgr = manager, !mgr.isEnabled {
+            try? await VPNProfileCoordinator.ensureEnabled(
+                manager: mgr,
+                settings: SharedSettingsStore.shared.appSettings
+            )
+        }
+        applyDisconnectedState()
+    }
+
+    private func applyDisconnectedState() {
         TunnelStatisticsStore.markDisconnected()
         TunnelStatisticsStore.clearPublicIP()
         var appSettings = SharedSettingsStore.shared.appSettings
@@ -220,26 +289,22 @@ final class VPNController: ObservableObject {
     }
 
     private func ensureManager() async throws -> NETunnelProviderManager {
-        if let manager { return manager }
+        let settings = SharedSettingsStore.shared.appSettings
+        let loaded = try await VPNProfileCoordinator.loadManager()
 
-        let mgr = NETunnelProviderManager()
-        let proto = NETunnelProviderProtocol()
-        proto.providerBundleIdentifier = providerBundleID
-        proto.serverAddress = "AzadiTunnel"
-        proto.providerConfiguration = [:]
-        mgr.protocolConfiguration = proto
-        mgr.localizedDescription = "AzadiTunnel"
-        mgr.isEnabled = true
-        VPNOnDemandConfigurator.apply(to: mgr, settings: SharedSettingsStore.shared.appSettings)
+        let mgr: NETunnelProviderManager
+        if let loaded {
+            mgr = loaded
+        } else {
+            mgr = VPNProfileCoordinator.createManager(settings: settings)
+            SharedLogger.shared.log(.vpnManagerCreated)
+        }
 
-        try await mgr.saveToPreferences()
-        SharedLogger.shared.log(.vpnManagerCreated)
+        let ready = try await VPNProfileCoordinator.ensureEnabled(manager: mgr, settings: settings)
+        manager = ready
+        vpnOnDemandEnabledOnDevice = ready.isOnDemandEnabled
         SharedLogger.shared.log(.vpnManagerSaved)
-
-        try await mgr.loadFromPreferences()
-        self.manager = mgr
-        vpnOnDemandEnabledOnDevice = mgr.isOnDemandEnabled
-        return mgr
+        return ready
     }
 
     private func observeConnection(_ mgr: NETunnelProviderManager) {
@@ -257,7 +322,10 @@ final class VPNController: ObservableObject {
 
     func syncStatusFromSharedStore() {
         refreshStatistics()
-        guard manager == nil else { return }
+        if manager != nil {
+            updateFromManager()
+            return
+        }
 
         let shared = SharedSettingsStore.shared.vpnStatus
         if status == .connecting || status == .disconnecting || shared == .connected || shared == .error {
@@ -276,30 +344,50 @@ final class VPNController: ObservableObject {
 
     private func updateFromManager() {
         guard let connection = manager?.connection else {
-            status = SharedSettingsStore.shared.vpnStatus
+            if optimisticDisconnect {
+                applyDisconnectedState()
+            } else {
+                status = SharedSettingsStore.shared.vpnStatus
+            }
             return
         }
-        let previous = status
+
         switch connection.status {
+        case .disconnected, .invalid:
+            optimisticDisconnect = false
+            applyDisconnectedState()
+            return
+        case .disconnecting:
+            if optimisticDisconnect {
+                applyDisconnectedState()
+                return
+            }
+            status = .disconnecting
+            statusMessage = "Disconnecting…"
         case .connected:
+            if optimisticDisconnect {
+                connection.stopVPNTunnel()
+                applyDisconnectedState()
+                return
+            }
+            let previous = status
             status = .connected
             statusMessage = "Connected"
             if previous != .connected {
                 Task { await self.handleConnectedSideEffects() }
             }
         case .connecting, .reasserting:
+            if optimisticDisconnect {
+                connection.stopVPNTunnel()
+                applyDisconnectedState()
+                return
+            }
             status = .connecting
             statusMessage = "Connecting…"
-        case .disconnecting:
-            status = .disconnecting
-            statusMessage = "Disconnecting…"
-        case .disconnected, .invalid:
-            TunnelStatisticsStore.markDisconnected()
-            status = .disconnected
-            statusMessage = "Disconnected"
         @unknown default:
-            status = .disconnected
-            statusMessage = "Disconnected"
+            optimisticDisconnect = false
+            applyDisconnectedState()
+            return
         }
         SharedSettingsStore.shared.vpnStatus = status
         refreshStatistics()

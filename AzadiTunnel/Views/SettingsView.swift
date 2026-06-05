@@ -46,6 +46,7 @@ struct SettingsView: View {
             }
             .onAppear { refresh() }
             }
+            .navigationViewStyle(StackNavigationViewStyle())
 
             if showToast {
                 VStack {

@@ -8,6 +8,7 @@ struct ContentView: View {
             NavigationView {
                 DashboardView()
             }
+            .navigationViewStyle(StackNavigationViewStyle())
             .tabItem {
                 Label(L10n.t(.tabVPN), systemImage: "shield.lefthalf.filled")
                     .accessibilityIdentifier("vpnTab")

@@ -89,6 +89,7 @@ struct OnboardingView: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
     }
 
     private func advance() {

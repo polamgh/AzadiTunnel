@@ -39,6 +39,7 @@ struct ConnectionDisclaimerSheet: View {
                 }
             }
         }
+        .navigationViewStyle(StackNavigationViewStyle())
         .onAppear {
             SharedLogger.shared.logRaw("DISCLAIMER_PRESENTED", detail: "source=first_connect")
         }

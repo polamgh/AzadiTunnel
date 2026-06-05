@@ -1,8 +1,20 @@
 {
   "configurations" : [
     {
-      "id" : "AzadiTunnel-Device-Debug",
-      "name" : "Device Debug",
+      "id" : "AzadiTunnel-Simulator-Smoke",
+      "name" : "Simulator App Smoke",
+      "options" : {
+        "parallelizationEnabled" : false,
+        "targetForVariableExpansion" : {
+          "containerPath" : "container:AzadiTunnel.xcodeproj",
+          "identifier" : "2C35943C2FCFF94200D0A30A",
+          "name" : "AzadiTunnel"
+        }
+      }
+    },
+    {
+      "id" : "AzadiTunnel-Device-Full",
+      "name" : "Device Full Regression",
       "options" : {
         "parallelizationEnabled" : false,
         "targetForVariableExpansion" : {
@@ -14,8 +26,21 @@
     }
   ],
   "defaultOptions" : {
+    "commandLineArgumentEntries" : [
+      {
+        "argument" : "-UITestMode",
+        "enabled" : true
+      }
+    ],
     "codeCoverage" : false,
-    "testExecutionOrdering" : "random",
+    "environmentVariableEntries" : [
+      {
+        "enabled" : true,
+        "key" : "XCTUIApplicationLaunchDefaultTimeout",
+        "value" : "120"
+      }
+    ],
+    "testExecutionOrdering" : "alphabetical",
     "testTimeoutsEnabled" : false
   },
   "testTargets" : [

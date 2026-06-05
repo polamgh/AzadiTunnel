@@ -9,6 +9,9 @@ final class AzadiTunnelConnectRegressionTests: XCTestCase {
     }
 
     func testHomeConnectRealInternetAndTraffic() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("VPN packet-tunnel connect regression requires a physical iOS device (Xcode Cloud: use Device Full Regression workflow).")
+        #endif
         let app = XCUIApplication()
         app.launchArguments += ["-UITestMode", "-UITestForceBootstrap"]
         app.launch()

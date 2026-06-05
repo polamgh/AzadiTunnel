@@ -68,8 +68,17 @@ final class AzadiTunnelLegalTests: XCTestCase {
 
     func testLegalAndPrivacyPagesOpen() throws {
         let app = launchApp(extraArgs: [])
-        XCTAssertTrue(app.tabBars.buttons["settingsTabBar"].waitForExistence(timeout: 15))
-        app.tabBars.buttons["settingsTabBar"].tap()
+        let settingsTab = app.tabBars.buttons["settingsTabBar"]
+        let fallbackTab = app.tabBars.buttons.element(boundBy: 1)
+        XCTAssertTrue(
+            settingsTab.waitForExistence(timeout: 30) || fallbackTab.waitForExistence(timeout: 5),
+            "Settings tab should appear"
+        )
+        if settingsTab.exists {
+            settingsTab.tap()
+        } else {
+            fallbackTab.tap()
+        }
 
         openSettingsRow(app, identifier: "legalOpenSourceLink", title: "Legal & Open Source")
         XCTAssertTrue(

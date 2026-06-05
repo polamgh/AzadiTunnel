@@ -27,10 +27,14 @@ grep -rl 'netinet6/in6.h' "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel" 2>/dev/nu
   sed -i '' 's/#import <netinet6\/in6.h>/#import <netinet\/in.h>/' "${f}"
 done
 
+if [[ -n "${GOROOT:-}" && -x "${GOROOT}/bin/go" ]]; then
+  export PATH="${GOROOT}/bin:${PATH}"
+fi
 export PATH="/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/go/bin:${PATH:-}"
 which go >/dev/null
 export GOROOT="$(go env GOROOT)"
-go version | grep -q 'go1.26' || { echo "Go 1.26.x required"; exit 1; }
+export PATH="${GOROOT}/bin:${PATH}"
+go version | grep -qE 'go1\.26' || { echo "Go 1.26.x required (GOROOT=${GOROOT})"; exit 1; }
 
 # shirokhorshid/psiphon-tunnel-core: in-proxy is ON by default (!PSIPHON_DISABLE_INPROXY).
 # PSIPHON_ENABLE_INPROXY does not exist in this fork (Shiro Android CI tag is a no-op here).

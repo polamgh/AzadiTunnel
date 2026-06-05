@@ -8,6 +8,9 @@ final class AzadiTunnelFeatureTests: XCTestCase {
     }
 
     func testAllFeaturesAfterVPNConnect() throws {
+        #if targetEnvironment(simulator)
+        throw XCTSkip("Post-connect feature tour requires a physical iOS device with an active VPN tunnel.")
+        #endif
         let app = XCUIApplication()
         app.launchArguments += ["-UITestMode", "-UITestAutoConnect", "-UITestForceBootstrap"]
         app.launch()

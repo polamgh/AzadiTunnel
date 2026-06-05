@@ -1,5 +1,12 @@
 # Testing — AzadiTunnel
 
+## Xcode Cloud
+
+CI scripts and workflow setup: [docs/XCODE_CLOUD.md](docs/XCODE_CLOUD.md).
+
+- **Simulator App Smoke:** bootstrap, legal, disclaimer, StoreKit (VPN tests skipped on Simulator).
+- **Device Full Regression:** all UI tests including real tunnel connect + `generate_204`.
+
 ## Phase 7 discipline
 
 Every change should record:

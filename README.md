@@ -43,4 +43,4 @@ xcodebuild build -project AzadiTunnel.xcodeproj -scheme AzadiTunnel -destination
 Scripts/run-real-device-regression.sh
 ```
 
-See [TESTING.md](TESTING.md), [LEGAL_NOTES.md](LEGAL_NOTES.md), [docs/PSIPHON_TUNNEL_CORE_RESEARCH.md](docs/PSIPHON_TUNNEL_CORE_RESEARCH.md).
+See [TESTING.md](TESTING.md), [docs/XCODE_CLOUD.md](docs/XCODE_CLOUD.md), [LEGAL_NOTES.md](LEGAL_NOTES.md), [docs/PSIPHON_TUNNEL_CORE_RESEARCH.md](docs/PSIPHON_TUNNEL_CORE_RESEARCH.md).

@@ -12,11 +12,13 @@ This file lists third-party software used by AzadiTunnel.
 
 ## psiphon-tunnel-core
 
-- **Project:** https://github.com/shirokhorshid/psiphon-tunnel-core  
+- **Projects:**  
+  - https://github.com/shirokhorshid/psiphon-tunnel-core (fork used for Shiro Khorshid / this client)  
+  - https://github.com/Psiphon-Labs/psiphon-tunnel-core (upstream Psiphon Labs)  
 - **License:** GNU General Public License v3  
-- **Use:** Tunnel client core (iOS `PsiphonTunnel` / `PsiphonTunnelCore.xcframework`)  
+- **Use:** Tunnel client core (iOS `PsiphonTunnel` / `PsiphonTunnelCore.xcframework`). AzadiTunnel links this library in-process in the Network Extension.  
 - **Pinned commit:** See `Tooling/psiphon/PSIPHON_PINNED_COMMIT`  
-- **Source offer:** Same repository as AzadiTunnel plus tunnel-core source at the pinned revision.
+- **Source offer:** Publish AzadiTunnel source at the release tag **and** make tunnel-core source available at the pinned commit (clone URL + commit hash above).
 
 ## tun2socks (packet forwarding)
 

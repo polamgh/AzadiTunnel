@@ -1,6 +1,26 @@
 # AzadiTunnel
 
-Open-source iOS VPN client (GPLv3) using [psiphon-tunnel-core](https://github.com/shirokhorshid/psiphon-tunnel-core). Connect flow matches [Shiro Khorshid / Psiphon iOS samples](https://github.com/shirokhorshid/psiphon-tunnel-core): bundled `psiphon-config.json` + `psiphon-embedded-server-entries.txt`, copied to App Group on first launch. Tap **Connect** — no JSON import required.
+Open-source iOS VPN client licensed under **GNU GPLv3**. It uses **[psiphon-tunnel-core](https://github.com/shirokhorshid/psiphon-tunnel-core)** (also GPLv3) for the packet-tunnel VPN stack.
+
+AzadiTunnel is **not** developed, endorsed, or affiliated with Psiphon Inc. Psiphon® is a registered trademark of Psiphon Inc.
+
+Connect flow follows [Shiro Khorshid / Psiphon iOS samples](https://github.com/shirokhorshid/psiphon-tunnel-core): bundled `psiphon-config.json` + `psiphon-embedded-server-entries.txt`, copied to the App Group on first launch. Tap **Connect** — no JSON import required.
+
+## License (GPLv3) and source code
+
+| Document | Purpose |
+|----------|---------|
+| [LICENSE](LICENSE) | Full GNU General Public License v3 text |
+| [COPYRIGHT.md](COPYRIGHT.md) | Copyright and source-offer summary |
+| [LEGAL_NOTES.md](LEGAL_NOTES.md) | Distribution, App Store, and compliance notes |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Psiphon, tunnel-core, tun2socks, Apple SDKs |
+
+**Corresponding source** for distributed binaries:
+
+1. This repository: `https://github.com/polamgh/AzadiTunnel` (tag or commit matching the build you ship).
+2. **psiphon-tunnel-core** at the pinned revision in [`Tooling/psiphon/PSIPHON_PINNED_COMMIT`](Tooling/psiphon/PSIPHON_PINNED_COMMIT) — build the iOS framework with [`Tooling/psiphon/build-ios-xcframework.sh`](Tooling/psiphon/build-ios-xcframework.sh) and link `Vendor/PsiphonTunnelCore.xcframework` to the packet-tunnel target only.
+
+**Private credentials** (distributor keys, remote server list signatures, local overrides) are **not** in this public tree. Use gitignored `*.local.json` / `*.local.txt` on your machine — see [docs/BUNDLED_PSIPHON_CONFIG.md](docs/BUNDLED_PSIPHON_CONFIG.md).
 
 ## Setup
 

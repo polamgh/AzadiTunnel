@@ -1,7 +1,18 @@
 # Xcode
 DerivedData/
+DerivedDataForCI/
 *.xcuserstate
 xcuserdata/
+*.p12
+*.mobileprovision
+*.provisionprofile
+*.cer
+*.pem
+*.key
+
+# Secrets / env
+.env
+.env.*
 
 # Local Psiphon configs (secrets) — never commit
 Tests/Fixtures/local-*.json
@@ -21,4 +32,3 @@ Tooling/psiphon/build/shiro-apk/
 
 # Local device/CI test output (may contain diagnostics)
 Tooling/test-logs/
-DerivedDataForCI/

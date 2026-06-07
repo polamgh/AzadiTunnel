@@ -16,7 +16,7 @@ enum FallbackChainController {
         let direct = Step(transport: .direct, protocolSelection: .direct, beast: false, timeoutSeconds: settings.fallbackTimeoutDirect)
         switch selection {
         case .cdnFronting: return [cdn, auto, direct]
-        case .auto: return [auto, direct]
+        case .auto: return [cdn, direct]
         case .direct: return [direct]
         case .conduit: return []
         }
@@ -87,7 +87,8 @@ enum FallbackChainController {
         state.isActive = false
         ConnectionDiagnosticsStore.saveFallback(state)
         SharedLogger.shared.logRaw("FALLBACK_EXHAUSTED", detail: "all_steps_failed")
-        vpn.setFallbackFailureMessage("Could not connect. Tried CDN, Auto+Beast, and Direct. See Logs for FALLBACK_* lines.")
+        let tried = chainSteps.map(\.transport.rawValue).joined(separator: ", ")
+        vpn.setFallbackFailureMessage("Could not connect. Tried \(tried). See Logs for FALLBACK_* lines.")
         return false
     }
 

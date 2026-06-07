@@ -55,6 +55,19 @@ enum ConnectionQualityService {
         return report
     }
 
+    /// Re-measure HTTPS latency and update the stored quality report (dashboard ping refresh).
+    static func refreshLatency() async -> Int {
+        let latency = await measureLatencyMs()
+        var report = ConnectionDiagnosticsStore.loadQuality() ?? ConnectionQualityReport()
+        report.latencyMs = latency
+        report.readyAt = Date()
+        ConnectionDiagnosticsStore.saveQuality(report)
+        if latency >= 0 {
+            SharedLogger.shared.logRaw("QUALITY_LATENCY_MS", detail: "value=\(latency) source=refresh")
+        }
+        return latency
+    }
+
     private static func measureLatencyMs() async -> Int {
         var request = URLRequest(url: generate204)
         request.httpMethod = "GET"

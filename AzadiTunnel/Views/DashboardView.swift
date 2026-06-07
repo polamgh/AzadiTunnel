@@ -13,6 +13,10 @@ struct DashboardView: View {
     @State private var showCopyToast = false
     @State private var toastMessage = ""
     @State private var copyToastHideTask: Task<Void, Never>?
+    @State private var displayedPingMs: Int = -1
+    @State private var pingRefreshing = false
+    @State private var pingRefreshInFlight = false
+    @State private var showRegionPicker = false
 
     var body: some View {
         ZStack {
@@ -86,6 +90,12 @@ struct DashboardView: View {
                 }
             )
         }
+        .sheet(isPresented: $showRegionPicker) {
+            DashboardRegionPickerSheet(
+                selectedCode: SharedSettingsStore.shared.appSettings.egressRegion,
+                onSelect: updateEgressRegion
+            )
+        }
         .task {
             await vpn.refreshStatusFromSystem()
             refreshConfigFlag()
@@ -121,6 +131,9 @@ struct DashboardView: View {
                 updateDuration()
                 try? await TaskSleep.seconds(1)
             }
+        }
+        .task(id: vpn.status) {
+            await runPingRefreshLoop()
         }
     }
 
@@ -205,9 +218,26 @@ struct DashboardView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "dot.radiowaves.left.and.right")
                                 .font(.caption2.weight(.semibold))
-                            Text(pingLabel)
+                            Text(pingDisplayText)
                                 .font(.system(.caption, design: .monospaced).weight(.medium))
                                 .lineLimit(1)
+                            Button {
+                                Task { await refreshPing() }
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption2.weight(.semibold))
+                                    .rotationEffect(.degrees(pingRefreshing ? 360 : 0))
+                                    .animation(
+                                        pingRefreshing
+                                            ? .linear(duration: 0.8).repeatForever(autoreverses: false)
+                                            : .default,
+                                        value: pingRefreshing
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(vpn.status != .connected || pingRefreshing)
+                            .accessibilityLabel(L10n.t(.refreshPing))
+                            .accessibilityIdentifier("pingRefreshButton")
                         }
                     }
                     .foregroundStyle(AppTheme.primaryText(for: colorScheme).opacity(0.85))
@@ -220,9 +250,40 @@ struct DashboardView: View {
         }
     }
 
-    private var pingLabel: String {
+    private func runPingRefreshLoop() async {
+        guard vpn.status == .connected else {
+            displayedPingMs = -1
+            return
+        }
+        displayedPingMs = ConnectionDiagnosticsStore.loadQuality()?.latencyMs ?? -1
+        while !Task.isCancelled, vpn.status == .connected {
+            try? await TaskSleep.seconds(5)
+            guard !Task.isCancelled, vpn.status == .connected else { break }
+            await refreshPing()
+        }
+    }
+
+    private func refreshPing() async {
+        guard vpn.status == .connected else {
+            displayedPingMs = -1
+            return
+        }
+        guard !pingRefreshInFlight else { return }
+        pingRefreshInFlight = true
+        pingRefreshing = true
+        defer {
+            pingRefreshInFlight = false
+            pingRefreshing = false
+        }
+        displayedPingMs = await ConnectionQualityService.refreshLatency()
+    }
+
+    private var pingDisplayText: String {
         guard vpn.status == .connected else { return "—" }
-        let ms = ConnectionDiagnosticsStore.loadQuality()?.latencyMs ?? -1
+        if pingRefreshing, displayedPingMs < 0 { return "…" }
+        let ms = displayedPingMs >= 0
+            ? displayedPingMs
+            : (ConnectionDiagnosticsStore.loadQuality()?.latencyMs ?? -1)
         return ms >= 0 ? "\(ms) ms" : "—"
     }
 
@@ -415,11 +476,8 @@ struct DashboardView: View {
                         Text(L10n.t(.region))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
-                        Menu {
-                            Button(L10n.t(.regionAny)) { updateEgressRegion("") }
-                            ForEach(PsiphonRegionList.all, id: \.self) { code in
-                                Button(code) { updateEgressRegion(code) }
-                            }
+                        Button {
+                            showRegionPicker = true
                         } label: {
                             HStack(spacing: 6) {
                                 Text(regionTitle)
@@ -430,6 +488,7 @@ struct DashboardView: View {
                                     .foregroundStyle(AppTheme.iranGreen)
                             }
                         }
+                        .buttonStyle(.plain)
                         .accessibilityIdentifier("dashboardRegionMenu")
                         if let subtitle = regionSubtitle {
                             Text(subtitle)
@@ -526,7 +585,8 @@ struct DashboardView: View {
 
     private var regionTitle: String {
         let r = SharedSettingsStore.shared.appSettings.egressRegion
-        return r.isEmpty ? L10n.t(.regionAny) : r
+        if r.isEmpty { return L10n.t(.regionAny) }
+        return RegionDisplayNames.pickerLabel(for: r)
     }
 
     private var regionSubtitle: String? {
@@ -565,6 +625,49 @@ struct DashboardView: View {
         var settings = SharedSettingsStore.shared.appSettings
         settings.egressRegion = code
         SharedSettingsStore.shared.updateAppSettings(settings, logKey: "dashboard_egress_region")
+    }
+}
+
+private struct DashboardRegionPickerSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    let selectedCode: String
+    let onSelect: (String) -> Void
+
+    var body: some View {
+        NavigationView {
+            List {
+                regionRow(label: L10n.t(.regionAny), code: "")
+                ForEach(PsiphonRegionList.all, id: \.self) { code in
+                    regionRow(label: RegionDisplayNames.pickerLabel(for: code), code: code)
+                }
+            }
+            .navigationTitle(L10n.t(.settingsEgressRegion))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(L10n.t(.cancel)) { dismiss() }
+                }
+            }
+        }
+        .navigationViewStyle(StackNavigationViewStyle())
+    }
+
+    private func regionRow(label: String, code: String) -> some View {
+        Button {
+            onSelect(code)
+            dismiss()
+        } label: {
+            HStack {
+                Text(label)
+                    .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                Spacer()
+                if selectedCode == code {
+                    Image(systemName: "checkmark")
+                        .foregroundStyle(AppTheme.iranGreen)
+                }
+            }
+        }
     }
 }
 

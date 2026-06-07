@@ -4,6 +4,7 @@ import UIKit
 struct LogsView: View {
     @State private var entries: [(id: Int, line: String)] = []
     @State private var showCopiedConfirmation = false
+    @State private var showClearConfirmation = false
 
     var body: some View {
         List(entries, id: \.id) { entry in
@@ -34,6 +35,12 @@ struct LogsView: View {
                     } label: {
                         Label(L10n.t(.refreshLogs), systemImage: "arrow.clockwise")
                     }
+                    Button(role: .destructive) {
+                        showClearConfirmation = true
+                    } label: {
+                        Label(L10n.t(.clearLogs), systemImage: "trash")
+                    }
+                    .accessibilityIdentifier("clear_logs_button")
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
@@ -43,6 +50,18 @@ struct LogsView: View {
         .onAppear { reload() }
         .alert(L10n.t(.logsCopiedTitle), isPresented: $showCopiedConfirmation) {
             Button(L10n.t(.understand), role: .cancel) {}
+        }
+        .confirmationDialog(
+            L10n.t(.clearLogs),
+            isPresented: $showClearConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(L10n.t(.clearLogs), role: .destructive) {
+                clearLogs()
+            }
+            Button(L10n.t(.cancel), role: .cancel) {}
+        } message: {
+            Text(L10n.t(.clearLogsConfirm))
         }
     }
 
@@ -54,5 +73,10 @@ struct LogsView: View {
     private func copyAllLogs() {
         UIPasteboard.general.string = SharedLogger.shared.exportText()
         showCopiedConfirmation = true
+    }
+
+    private func clearLogs() {
+        SharedLogger.shared.clear()
+        reload()
     }
 }

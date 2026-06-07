@@ -83,7 +83,7 @@ struct SettingsView: View {
             Picker(L10n.t(.settingsEgressRegion), selection: $settings.egressRegion) {
                 Text(L10n.t(.regionAny)).tag("")
                 ForEach(PsiphonRegionList.all, id: \.self) { code in
-                    Text(code).tag(code)
+                    Text(RegionDisplayNames.pickerLabel(for: code)).tag(code)
                 }
             }
             .onChange(of: settings.egressRegion) { _ in

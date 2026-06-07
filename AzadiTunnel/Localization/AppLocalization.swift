@@ -161,6 +161,7 @@ final class AppLanguageController: ObservableObject {
         case splashTagline
         case diagnosticsSection
         case vpnPing
+        case refreshPing
         case copy
         case copiedToClipboard
         case testPass
@@ -262,6 +263,8 @@ final class AppLanguageController: ObservableObject {
         case changeRegion
         case copyLogLine
         case copyAllLogs
+        case clearLogs
+        case clearLogsConfirm
         case refreshLogs
         case logsCopiedTitle
         case supportIntro

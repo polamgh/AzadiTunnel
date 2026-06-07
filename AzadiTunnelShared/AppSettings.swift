@@ -25,7 +25,7 @@ struct AppSettings: Codable, Equatable {
     /// Shiro always sets `FrontedMeekCDNScanUseBuiltInSpec` true; toggle disables built-in scan spec.
     var cdnFrontingUseBuiltInScan: Bool = true
     var beastModeEnabled: Bool = true
-    /// When enabled (and not Conduit), connect tries CDN → Auto+Beast → Direct with timeouts.
+    /// When enabled (and not Conduit), connect tries fallback chains: Auto → CDN then Direct; CDN mode → CDN, Auto+Beast, Direct.
     var smartFallbackChainEnabled: Bool = true
     var fallbackTimeoutCDN: TimeInterval = 120
     var fallbackTimeoutAutoBeast: TimeInterval = 120

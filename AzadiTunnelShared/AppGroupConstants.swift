@@ -81,6 +81,7 @@ enum SharedLogEvent: String, CaseIterable {
     case tunnelStartFailed = "TUNNEL_START_FAILED"
     case tunnelStopCleanup = "TUNNEL_STOP_CLEANUP"
     case settingChanged = "SETTING_CHANGED"
+    case settingsResetToDefaults = "SETTINGS_RESET_TO_DEFAULTS"
     case internetTestPassed = "INTERNET_TEST_PASSED"
     case internetTestFailed = "INTERNET_TEST_FAILED"
     case dnsForwardOk = "DNS_FORWARD_OK"

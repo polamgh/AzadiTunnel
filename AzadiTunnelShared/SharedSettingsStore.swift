@@ -307,6 +307,12 @@ final class SharedSettingsStore {
         try? recomposeEffectiveConfig()
     }
 
+    func resetAppSettingsToDefaults() {
+        let fresh = AppSettings.factoryDefaults(preserving: appSettings)
+        updateAppSettings(fresh, logKey: "reset_to_defaults")
+        SharedLogger.shared.log(.settingsResetToDefaults)
+    }
+
     func extensionCanReadSettings() -> Bool {
         defaults != nil
     }

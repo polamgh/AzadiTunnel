@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var showToast = false
     @State private var toastMessage = ""
     @State private var toastHideTask: Task<Void, Never>?
+    @State private var showResetDefaultsConfirm = false
 
     var body: some View {
         ZStack {
@@ -62,6 +63,14 @@ struct SettingsView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: showToast)
+        .alert(L10n.t(.settingsResetDefaultsConfirmTitle), isPresented: $showResetDefaultsConfirm) {
+            Button(L10n.t(.settingsResetDefaults), role: .destructive) {
+                resetSettingsToDefaults()
+            }
+            Button(L10n.t(.cancel), role: .cancel) {}
+        } message: {
+            Text(L10n.t(.settingsResetDefaultsConfirmMessage))
+        }
     }
 
     private var connectionSection: some View {
@@ -361,6 +370,10 @@ struct SettingsView: View {
                 presentToast(L10n.t(.settingsDebugReportReady))
             }
             .accessibilityIdentifier("export_debug_report_button")
+            Button(L10n.t(.settingsResetDefaults), role: .destructive) {
+                showResetDefaultsConfirm = true
+            }
+            .accessibilityIdentifier("reset_settings_defaults_button")
         }
     }
 
@@ -426,6 +439,17 @@ struct SettingsView: View {
             importError = error.localizedDescription
             presentToast(L10n.t(.settingsConfigImportFailed))
         }
+    }
+
+    private func resetSettingsToDefaults() {
+        SharedSettingsStore.shared.resetAppSettingsToDefaults()
+        refresh()
+        AppLanguageController.shared.reload()
+        Task {
+            await VPNController.shared.applyOnDemandFromAppSettings()
+            await reconnectIfConnected()
+        }
+        presentToast(L10n.t(.settingsResetDefaultsDone))
     }
 
     private func presentToast(_ message: String) {

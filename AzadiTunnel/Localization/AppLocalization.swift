@@ -227,6 +227,10 @@ final class AppLanguageController: ObservableObject {
         case settingsAdvancedHint
         case settingsRetryBundled
         case settingsRetryBundledFailed
+        case settingsResetDefaults
+        case settingsResetDefaultsConfirmTitle
+        case settingsResetDefaultsConfirmMessage
+        case settingsResetDefaultsDone
         case settingsBundledInstallSuccess
         case settingsConfigImportSuccess
         case settingsConfigImportFailed

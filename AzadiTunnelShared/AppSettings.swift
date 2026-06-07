@@ -127,4 +127,15 @@ struct AppSettings: Codable, Equatable {
             }
         }
     }
+
+    /// Fresh factory defaults while keeping onboarding, disclaimer, and language choice.
+    static func factoryDefaults(preserving from: AppSettings) -> AppSettings {
+        var fresh = AppSettings()
+        fresh.hasAcceptedConnectionDisclaimer = from.hasAcceptedConnectionDisclaimer
+        fresh.hasAcceptedVPNDisclosure = from.hasAcceptedVPNDisclosure
+        fresh.hasCompletedOnboarding = from.hasCompletedOnboarding
+        fresh.hasChosenLanguage = from.hasChosenLanguage
+        fresh.preferredLanguage = from.preferredLanguage
+        return fresh
+    }
 }

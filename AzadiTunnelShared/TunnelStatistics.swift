@@ -23,6 +23,8 @@ struct TunnelStatistics: Codable, Equatable {
     var connectedCountry: String = ""
     /// TCP flows successfully relayed through tun2socks → SOCKS (real browsing path).
     var tcpRelaySessions: UInt64 = 0
+    /// True when connected in Proxy Only mode (no full-device routing).
+    var proxyOnlyModeActive: Bool = false
 
     var sessionDuration: TimeInterval {
         guard let connectedAt else { return 0 }
@@ -105,10 +107,11 @@ enum TunnelStatisticsStore {
         save(s)
     }
 
-    static func markConnected(region: String) {
+    static func markConnected(region: String, proxyOnly: Bool = false) {
         var s = load()
         s.connectedAt = Date()
         s.selectedRegion = region
+        s.proxyOnlyModeActive = proxyOnly
         save(s)
     }
 
@@ -118,6 +121,7 @@ enum TunnelStatisticsStore {
         s.downloadSpeedBps = 0
         s.uploadSpeedBps = 0
         s.connectedTunnelProtocol = ""
+        s.proxyOnlyModeActive = false
         clearConduitStatus(on: &s)
         save(s)
     }

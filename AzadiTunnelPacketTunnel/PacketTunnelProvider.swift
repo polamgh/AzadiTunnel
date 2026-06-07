@@ -123,6 +123,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         let region = SharedSettingsStore.shared.appSettings.egressRegion
+        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled,
+           LocalNetworkAddress.wifiIPv4() == nil {
+            SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=extension")
+            completionHandler(NSError(
+                domain: "AzadiTunnel",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Proxy Only Mode requires Wi-Fi."]
+            ))
+            return
+        }
+
         TunnelStatisticsStore.resetSession()
         SharedSettingsStore.shared.lastInternetTestOK = false
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
@@ -145,30 +156,46 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     throw PsiphonTunnelCoreError.proxyNotReady
                 }
 
-                let settings = Self.makeNetworkSettings(endpoints: endpoints)
+                let appSettings = SharedSettingsStore.shared.appSettings
+                let proxyOnly = appSettings.proxyOnlyModeEnabled
+                if proxyOnly {
+                    SharedLogger.shared.log(.proxyOnlyModeEnabled)
+                    SharedLogger.shared.log(.proxyOnlyWarningNotFullVPN)
+                } else {
+                    SharedLogger.shared.log(.proxyOnlyModeDisabled)
+                }
+
+                let networkSettings = proxyOnly
+                    ? Self.makeProxyOnlyNetworkSettings()
+                    : Self.makeNetworkSettings(endpoints: endpoints)
                 try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                    self.setTunnelNetworkSettings(settings) { error in
+                    self.setTunnelNetworkSettings(networkSettings) { error in
                         if let error { cont.resume(throwing: error) }
                         else { cont.resume() }
                     }
                 }
 
-                SharedLogger.shared.log(.packetForwardingStartRequested)
-                let forwarder = PacketTunnelTrafficForwarder(
-                    packetFlow: self.packetFlow,
-                    socksHost: endpoints.host,
-                    socksPort: endpoints.socksPort,
-                    httpPort: endpoints.httpPort,
-                    proxyType: endpoints.hasHttp ? .dual : .socks
-                )
-                try forwarder.start()
-                self.forwarder = forwarder
-                SharedLogger.shared.log(.packetForwardingStarted)
+                if !proxyOnly {
+                    SharedLogger.shared.log(.packetForwardingStartRequested)
+                    let forwarder = PacketTunnelTrafficForwarder(
+                        packetFlow: self.packetFlow,
+                        socksHost: endpoints.host,
+                        socksPort: endpoints.socksPort,
+                        httpPort: endpoints.httpPort,
+                        proxyType: endpoints.hasHttp ? .dual : .socks
+                    )
+                    try forwarder.start()
+                    self.forwarder = forwarder
+                    SharedLogger.shared.log(.packetForwardingStarted)
 #if canImport(tun2socks)
-                TunnelStackProbe.runAfterForwardingStarted()
+                    TunnelStackProbe.runAfterForwardingStarted()
 #endif
+                }
 
-                TunnelStatisticsStore.markConnected(region: region.isEmpty ? "Any" : region)
+                TunnelStatisticsStore.markConnected(
+                    region: region.isEmpty ? "Any" : region,
+                    proxyOnly: proxyOnly
+                )
                 self.startStatsSampler()
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 self.startConnectivityProbe(endpoints: endpoints)
@@ -176,10 +203,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 SharedSettingsStore.shared.vpnStatus = .connected
                 SharedLogger.shared.log(.tunnelConnected)
 
-                let appSettings = SharedSettingsStore.shared.appSettings
-                if appSettings.shareProxyOnLocalNetworkEnabled {
-                    SharedLogger.shared.log(.lanProxyVpnReconnected)
-                    await self.startLANProxy(using: endpoints)
+                await self.startProxyBridge(using: endpoints, proxyOnly: proxyOnly)
+
+                if proxyOnly {
+                    Task {
+                        let ip = await ProxyOnlyPublicIPService.fetch(endpoints: endpoints)
+                        if !ip.isEmpty {
+                            TunnelStatisticsStore.setPublicIP(ip)
+                        }
+                    }
                 }
 
                 completionHandler(nil)
@@ -273,21 +305,56 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         switch cmd {
-        case "lan-proxy:start", "lan-proxy:restart":
+        case "lan-proxy:start", "lan-proxy:restart", "proxy-bridge:restart":
             Task { [weak self] in
                 guard let self else { completionHandler?(nil); return }
                 if let endpoints = self.engine?.localProxyEndpoints, endpoints.hasSocks {
-                    await self.startLANProxy(using: endpoints)
+                    let proxyOnly = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+                    await self.startProxyBridge(using: endpoints, proxyOnly: proxyOnly)
                 } else {
                     SharedSettingsStore.shared.lanProxyRuntimeStatus = .vpnDisconnected
                 }
                 completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
             }
         case "lan-proxy:stop":
-            stopLANProxy(reason: .userToggle)
-            completionHandler?(LANProxyRuntimeStatus.stopped.rawValue.data(using: .utf8))
+            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+                Task { [weak self] in
+                    guard let self else { completionHandler?(nil); return }
+                    if let endpoints = self.engine?.localProxyEndpoints, endpoints.hasSocks {
+                        await self.startProxyBridge(using: endpoints, proxyOnly: true)
+                    }
+                    completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
+                }
+            } else {
+                stopLANProxy(reason: .userToggle)
+                completionHandler?(LANProxyRuntimeStatus.stopped.rawValue.data(using: .utf8))
+            }
         case "lan-proxy:status":
             completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
+        case "proxy-only:socks-self-test":
+            Task {
+                let port = SharedSettingsStore.shared.appSettings.lanSocksProxyPort
+                let result = await ProxyOnlySocksSelfTest.probe(host: "127.0.0.1", port: port)
+                SharedLogger.shared.log(.proxyOnlySocksSelfTestExtension, detail: result.logDetail)
+                if result.handshakeOK {
+                    SharedLogger.shared.log(.proxyOnlySocksHandshakeOk, detail: "source=extension_self_test")
+                } else {
+                    SharedLogger.shared.log(.proxyOnlySocksHandshakeFailed, detail: "source=extension_self_test \(result.logDetail)")
+                }
+                completionHandler?(result.logDetail.data(using: .utf8))
+            }
+        case "proxy-only:fetch-public-ip":
+            Task { [weak self] in
+                guard let self, let endpoints = self.engine?.localProxyEndpoints else {
+                    completionHandler?(nil)
+                    return
+                }
+                let ip = await ProxyOnlyPublicIPService.fetch(endpoints: endpoints)
+                if !ip.isEmpty {
+                    TunnelStatisticsStore.setPublicIP(ip)
+                }
+                completionHandler?(ip.data(using: .utf8))
+            }
         default:
             completionHandler?(nil)
         }
@@ -298,28 +365,36 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         case userToggle
     }
 
-    private func startLANProxy(using endpoints: PsiphonLocalProxyEndpoints) async {
+    /// Starts the HTTP/SOCKS bridge to Psiphon loopback ports.
+    /// - Proxy Only: always starts (127.0.0.1, or Wi-Fi when LAN share is on).
+    /// - Full VPN: only when Share Proxy on Local Network is enabled.
+    private func startProxyBridge(using endpoints: PsiphonLocalProxyEndpoints, proxyOnly: Bool) async {
         let settings = SharedSettingsStore.shared.appSettings
-        guard settings.shareProxyOnLocalNetworkEnabled else { return }
+        guard proxyOnly || settings.shareProxyOnLocalNetworkEnabled else { return }
 
-        guard endpoints.hasSocks else {
-            SharedSettingsStore.shared.lanProxyRuntimeStatus = .vpnDisconnected
+        let bindHost = resolveProxyBindHost(proxyOnly: proxyOnly, shareLAN: settings.shareProxyOnLocalNetworkEnabled)
+        guard let bindHost else {
+            if proxyOnly {
+                SharedSettingsStore.shared.lanProxyRuntimeStatus = .noWifiIP
+                SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=extension_bridge")
+            } else {
+                SharedSettingsStore.shared.lanProxyRuntimeStatus = .noWifiIP
+            }
             return
         }
 
-        // Prefer Wi-Fi address (en0); fall back to 0.0.0.0 so binding still succeeds when
-        // the device is on Wi-Fi via shared connection / personal hotspot client.
-        let bindHost: String
-        if let wifi = LocalNetworkAddress.wifiIPv4() {
-            SharedLogger.shared.log(.lanProxyWifiDetected, detail: "ip=\(wifi)")
-            bindHost = wifi
+        if proxyOnly {
+            SharedLogger.shared.logRaw(
+                "PROXY_ONLY_HTTP_LISTENING",
+                detail: "host=\(bindHost) port=\(settings.lanHttpProxyPort)"
+            )
+            SharedLogger.shared.logRaw(
+                "PROXY_ONLY_SOCKS_LISTENING",
+                detail: "host=\(bindHost) port=\(settings.lanSocksProxyPort)"
+            )
         } else {
-            SharedLogger.shared.log(.lanProxyWifiMissing)
-            SharedSettingsStore.shared.lanProxyRuntimeStatus = .noWifiIP
-            return
+            SharedLogger.shared.log(.lanProxyEnabled, detail: "http=\(settings.lanHttpProxyPort) socks=\(settings.lanSocksProxyPort)")
         }
-
-        SharedLogger.shared.log(.lanProxyEnabled, detail: "http=\(settings.lanHttpProxyPort) socks=\(settings.lanSocksProxyPort)")
 
         let configuration = LANProxyBridge.Configuration(
             bindHost: bindHost,
@@ -331,7 +406,47 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 psiphonSocksPort: endpoints.socksPort
             )
         )
-        _ = await lanProxy.start(configuration: configuration)
+        let outcome = await lanProxy.start(configuration: configuration)
+        if proxyOnly, case .success = outcome {
+            SharedLogger.shared.log(
+                .proxyOnlyHttpListening,
+                detail: "host=\(bindHost) port=\(settings.lanHttpProxyPort)"
+            )
+            SharedLogger.shared.log(
+                .proxyOnlySocksListening,
+                detail: "host=\(bindHost) port=\(settings.lanSocksProxyPort)"
+            )
+        }
+        _ = outcome
+    }
+
+    /// Proxy Only: bind Wi-Fi IP only — same-device apps cannot reach extension loopback.
+    private func resolveProxyBindHost(proxyOnly: Bool, shareLAN: Bool) -> String? {
+        if proxyOnly {
+            if let wifi = LocalNetworkAddress.wifiIPv4() {
+                SharedLogger.shared.log(
+                    .lanProxyWifiDetected,
+                    detail: "ip=\(wifi) context=proxy_only_same_device share_lan=\(shareLAN)"
+                )
+                return wifi
+            }
+            SharedLogger.shared.log(.lanProxyWifiMissing, detail: "context=proxy_only_blocked")
+            return nil
+        }
+        guard shareLAN else { return nil }
+        if let wifi = LocalNetworkAddress.wifiIPv4() {
+            SharedLogger.shared.log(.lanProxyWifiDetected, detail: "ip=\(wifi)")
+            return wifi
+        }
+        SharedLogger.shared.log(.lanProxyWifiMissing)
+        return nil
+    }
+
+    private func startLANProxy(using endpoints: PsiphonLocalProxyEndpoints) async {
+        await startProxyBridge(
+            using: endpoints,
+            proxyOnly: SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+        )
     }
 
     private func stopLANProxy(reason: LANProxyStopReason) {
@@ -383,6 +498,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             )
         }
 
+        return settings
+    }
+
+    /// Minimal tunnel settings for Proxy Only — extension stays alive; no routes, DNS, or system proxy.
+    ///
+    /// Apps must opt in manually (HTTP/SOCKS on Wi-Fi IP:8087/:1088). `NEProxySettings` with
+    /// `matchDomains=[""]` would force system-wide HTTP/HTTPS through the tunnel proxy.
+    private static func makeProxyOnlyNetworkSettings() -> NEPacketTunnelNetworkSettings {
+        let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
+        SharedLogger.shared.log(.proxyOnlyNoDefaultRoute, detail: "no_ipv4_routes")
+        SharedLogger.shared.log(.proxyOnlyNoSystemProxy, detail: "manual_proxy_only")
         return settings
     }
 }

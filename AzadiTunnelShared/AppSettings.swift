@@ -44,6 +44,9 @@ struct AppSettings: Codable, Equatable {
     /// First-launch language picker completed (English or Persian chosen explicitly).
     var hasChosenLanguage: Bool = false
 
+    /// When true, Psiphon runs without full-tunnel routing; only local HTTP/SOCKS listeners relay traffic.
+    var proxyOnlyModeEnabled: Bool = false
+
     /// Share this iPhone's tunneled proxy with other devices on the same Wi-Fi.
     var shareProxyOnLocalNetworkEnabled: Bool = false
     /// LAN HTTP proxy listener port (1024…65535).

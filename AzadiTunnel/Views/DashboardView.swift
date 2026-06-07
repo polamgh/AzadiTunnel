@@ -30,6 +30,8 @@ struct DashboardView: View {
                         .padding(.horizontal, 8)
                     if !configReady { ConfigSetupBanner() }
                     if vpn.banner != .none { ErrorBanner(kind: vpn.banner, message: vpn.lastError) }
+                    if showProxyOnlyWarning { proxyOnlyWarningBanner }
+                    if vpn.status == .connected, showProxyOnlyCard { proxyOnlyCard }
                     statusHero
                     ConnectPowerButton(
                         status: vpn.status,
@@ -95,6 +97,16 @@ struct DashboardView: View {
                 selectedCode: SharedSettingsStore.shared.appSettings.egressRegion,
                 onSelect: updateEgressRegion
             )
+        }
+        .alert(L10n.t(.proxyOnlyRequiresWifiTitle), isPresented: $vpn.showProxyOnlyNoWiFiPrompt) {
+            Button(L10n.t(.proxyOnlyTurnOffMode)) {
+                Task { await vpn.disableProxyOnlyModeAndConnect() }
+            }
+            Button(L10n.t(.cancel), role: .cancel) {
+                vpn.cancelProxyOnlyNoWiFiConnect()
+            }
+        } message: {
+            Text(L10n.t(.proxyOnlyRequiresWifiMessage))
         }
         .task {
             await vpn.refreshStatusFromSystem()
@@ -559,13 +571,131 @@ struct DashboardView: View {
         }
     }
 
+    private var showProxyOnlyWarning: Bool {
+        SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+            && vpn.status == .connected
+            && (vpn.statistics.proxyOnlyModeActive || SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled)
+    }
+
+    private var showProxyOnlyCard: Bool {
+        vpn.statistics.proxyOnlyModeActive
+            || (SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled && vpn.status == .connected)
+    }
+
+    private var proxyOnlyWarningBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(L10n.t(.proxyOnlyWarningDashboard))
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.12))
+        )
+        .accessibilityIdentifier("proxyOnlyWarningBanner")
+    }
+
+    private var proxyOnlyCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.left.arrow.right.circle")
+                        .foregroundStyle(.orange)
+                    Text(L10n.t(.proxyOnlyModeProxyOnly))
+                        .font(.subheadline.weight(.semibold))
+                }
+                Text(L10n.t(.proxyOnlySameDeviceAddresses))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                if let host = proxySameDeviceHost {
+                    proxyOnlyAddressRow(
+                        title: L10n.t(.shareProxyHttpAddressTitle),
+                        value: "\(host):\(proxyHttpPort)"
+                    )
+                    proxyOnlyAddressRow(
+                        title: L10n.t(.shareProxySocksAddressTitle),
+                        value: "\(host):\(proxySocksPort)"
+                    )
+                } else {
+                    Text(L10n.t(.proxyOnlyNoWifiSameDevice))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                Text(L10n.t(.proxyOnlyLoopbackNotReachable))
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                Text(L10n.t(.proxyOnlyWarningFull))
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .accessibilityIdentifier("proxyOnlyDashboardCard")
+    }
+
+    private var proxySameDeviceHost: String? {
+        SameDeviceProxyAddress.reachableHost(
+            boundHost: SharedSettingsStore.shared.lanProxyBoundHost
+        ) ?? LocalNetworkAddress.wifiIPv4()
+    }
+
+    private var proxyHttpPort: Int {
+        let active = SharedSettingsStore.shared.lanProxyActiveHttpPort
+        return active > 0 ? active : SharedSettingsStore.shared.appSettings.lanHttpProxyPort
+    }
+
+    private var proxySocksPort: Int {
+        let active = SharedSettingsStore.shared.lanProxyActiveSocksPort
+        return active > 0 ? active : SharedSettingsStore.shared.appSettings.lanSocksProxyPort
+    }
+
+    private func proxyOnlyAddressRow(title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+            Spacer()
+            Text(value)
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+            Button {
+                UIPasteboard.general.string = value
+                presentCopyToast(L10n.t(.copiedToClipboard))
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L10n.t(.copy))
+        }
+    }
+
+    private func presentCopyToast(_ message: String) {
+        copyToastHideTask?.cancel()
+        toastMessage = message
+        showCopyToast = true
+        copyToastHideTask = Task {
+            try? await TaskSleep.seconds(2)
+            guard !Task.isCancelled else { return }
+            await MainActor.run { showCopyToast = false }
+        }
+    }
+
     private var localizedStatusMessage: String {
         if showConduitProgress, vpn.status == .connecting,
            !vpn.statistics.conduitStatusLine.isEmpty {
             return vpn.statistics.conduitStatusLine
         }
         switch vpn.status {
-        case .connected: return L10n.t(.connected)
+        case .connected:
+            if vpn.statistics.proxyOnlyModeActive
+                || SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+                return L10n.t(.proxyOnlyStatusConnected)
+            }
+            return L10n.t(.connected)
         case .connecting: return L10n.t(.connecting)
         case .disconnecting: return L10n.t(.disconnecting)
         case .disconnected: return L10n.t(.disconnected)
@@ -597,7 +727,13 @@ struct DashboardView: View {
 
     private var publicIPLabel: String {
         let ip = vpn.statistics.lastPublicIP
-        return ip.isEmpty ? "—" : ip
+        if !ip.isEmpty { return ip }
+        if vpn.status == .connected,
+           SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+            || vpn.statistics.proxyOnlyModeActive {
+            return L10n.t(.proxyOnlyPublicIPUnavailable)
+        }
+        return "—"
     }
 
     private var connectedProtocolLabel: String? {

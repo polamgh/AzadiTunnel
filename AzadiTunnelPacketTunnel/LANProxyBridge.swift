@@ -404,6 +404,9 @@ final class LANProxyBridge: @unchecked Sendable {
         guard config != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxyHttpClientConnected)
+        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+            SharedLogger.shared.log(.proxyOnlyClientConnected, detail: "kind=http")
+        }
         incoming.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
@@ -426,6 +429,9 @@ final class LANProxyBridge: @unchecked Sendable {
         guard config != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxySocksClientConnected)
+        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+            SharedLogger.shared.log(.proxyOnlySocksClientConnected)
+        }
         incoming.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
@@ -562,9 +568,15 @@ final class LANProxyBridge: @unchecked Sendable {
             }
             try await sendSOCKSReply(client, code: 0x00) // success
             SharedLogger.shared.log(.lanProxySocksConnectEstablished, detail: "\(host):\(port)")
+            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+                SharedLogger.shared.log(.proxyOnlySocksHandshakeOk, detail: "\(host):\(port)")
+            }
             untrack(client)
             startRelay(client: client, upstream: upstream, label: "socks")
         } catch {
+            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+                SharedLogger.shared.log(.proxyOnlySocksHandshakeFailed, detail: errText(error))
+            }
             SharedLogger.shared.log(.lanProxyRelayError, detail: "stage=socks_handshake \(errText(error))")
             untrack(client)
             client.cancel()

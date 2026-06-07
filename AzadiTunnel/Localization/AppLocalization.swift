@@ -333,6 +333,37 @@ final class AppLanguageController: ObservableObject {
         case shareProxyInstructionsAndroidTV
         case shareProxySocksNoteTitle
         case shareProxySocksNoteBody
+        case proxyOnlyRowTitle
+        case proxyOnlyRowSubtitle
+        case proxyOnlyNavTitle
+        case proxyOnlyEnableTitle
+        case proxyOnlyEnableDescription
+        case proxyOnlyWarningShort
+        case proxyOnlyWarningFull
+        case proxyOnlyWarningDashboard
+        case proxyOnlyModeSection
+        case proxyOnlyModeFullVPN
+        case proxyOnlyModeProxyOnly
+        case proxyOnlyLocalAddresses
+        case proxyOnlyLanAddresses
+        case proxyOnlyStatusConnected
+        case proxyOnlyReconnectHint
+        case proxyOnlyConfiguredAppsHint
+        case proxyOnlySameDeviceAddresses
+        case proxyOnlyLoopbackNotReachable
+        case proxyOnlySocksSelfTestTitle
+        case proxyOnlySocksSelfTestButton
+        case proxyOnlySocksSelfTestRunning
+        case proxyOnlyTelegramHint
+        case proxyOnlyNoWifiSameDevice
+        case proxyOnlyPublicIPUnavailable
+        case proxyOnlySocksSelfTestWifiOK
+        case proxyOnlySocksSelfTestWifiFailed
+        case proxyOnlySocksSelfTestNoWifi
+        case proxyOnlyRequiresWifiTitle
+        case proxyOnlyRequiresWifiMessage
+        case proxyOnlyTurnOffMode
+        case proxyOnlyNotAvailableOnCellular
     }
 
     private static var extraEn: [L10nKey: String] = [:]

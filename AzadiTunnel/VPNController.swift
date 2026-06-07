@@ -22,6 +22,7 @@ final class VPNController: ObservableObject {
     @Published private(set) var banner: VPNBannerKind = .none
     @Published private(set) var statistics: TunnelStatistics = TunnelStatistics()
     @Published private(set) var vpnOnDemandEnabledOnDevice: Bool = false
+    @Published var showProxyOnlyNoWiFiPrompt = false
 
     private var manager: NETunnelProviderManager?
     private let providerBundleID = "com.polamgh.ali.AzadiTunnel.PacketTunnel"
@@ -106,7 +107,29 @@ final class VPNController: ObservableObject {
             return
         }
 
+        if ProxyOnlyWiFiRequirement.isBlocked {
+            SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=vpn_controller")
+            SharedLogger.shared.log(.proxyOnlyDisableOffered)
+            showProxyOnlyNoWiFiPrompt = true
+            return
+        }
+
         await startTunnel()
+    }
+
+    func cancelProxyOnlyNoWiFiConnect() {
+        SharedLogger.shared.log(.proxyOnlyStartCancelledNoWifi)
+        showProxyOnlyNoWiFiPrompt = false
+    }
+
+    func disableProxyOnlyModeAndConnect() async {
+        SharedLogger.shared.log(.proxyOnlyDisabledByUser)
+        showProxyOnlyNoWiFiPrompt = false
+        var settings = SharedSettingsStore.shared.appSettings
+        settings.proxyOnlyModeEnabled = false
+        SharedSettingsStore.shared.updateAppSettings(settings, logKey: "proxy_only_disabled_no_wifi")
+        SharedLogger.shared.log(.proxyOnlyModeDisabled)
+        await connect()
     }
 
     private func startTunnel() async {
@@ -235,16 +258,26 @@ final class VPNController: ObservableObject {
 
     func handleConnectedSideEffects() async {
         refreshStatistics()
+        let proxyOnly = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
         let ok = await InternetConnectivityTest.waitForExtensionResult()
         if ok {
             banner = .none
-            await PublicIPFetcher.fetchIfNeeded()
-            refreshStatistics()
-            _ = await LeakTestService.runAfterConnect()
-            _ = await ConnectionQualityService.runAfterConnect()
+            if !proxyOnly {
+                await PublicIPFetcher.fetchIfNeeded()
+                refreshStatistics()
+                _ = await LeakTestService.runAfterConnect()
+                _ = await ConnectionQualityService.runAfterConnect()
+            } else {
+                SharedLogger.shared.log(.proxyOnlyWarningNotFullVPN)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                await PublicIPFetcher.fetchIfNeeded()
+                refreshStatistics()
+            }
         } else {
             banner = .internetTestFailed
-            lastError = "VPN is up but internet check failed. See Logs for INTERNET_TEST_* and PSIPHON_PROXY_MODE."
+            lastError = proxyOnly
+                ? "Proxy is up but connectivity check failed. See Logs for INTERNET_TEST_*."
+                : "VPN is up but internet check failed. See Logs for INTERNET_TEST_* and PSIPHON_PROXY_MODE."
         }
         refreshStatistics()
         scheduleAutoReconnectIfNeeded()
@@ -400,7 +433,9 @@ final class VPNController: ObservableObject {
             }
             let previous = status
             status = .connected
-            statusMessage = "Connected"
+            statusMessage = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+                ? L10n.t(.proxyOnlyStatusConnected)
+                : "Connected"
             if previous != .connected {
                 Task { await self.handleConnectedSideEffects() }
             }

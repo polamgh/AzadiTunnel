@@ -323,13 +323,18 @@ struct ShareProxyView: View {
     private func applyToggleChange(_ enabled: Bool) async {
         if enabled {
             if vpn.status == .connected {
-                _ = await vpn.sendProviderMessage("lan-proxy:start")
+                let cmd = settings.proxyOnlyModeEnabled ? "proxy-bridge:restart" : "lan-proxy:start"
+                _ = await vpn.sendProviderMessage(cmd)
             } else {
                 runtimeStatus = .vpnDisconnected
             }
         } else {
-            _ = await vpn.sendProviderMessage("lan-proxy:stop")
-            runtimeStatus = .stopped
+            if settings.proxyOnlyModeEnabled, vpn.status == .connected {
+                _ = await vpn.sendProviderMessage("proxy-bridge:restart")
+            } else {
+                _ = await vpn.sendProviderMessage("lan-proxy:stop")
+                runtimeStatus = .stopped
+            }
         }
         readRuntime()
     }
@@ -359,7 +364,8 @@ struct ShareProxyView: View {
         presentToast(L10n.t(.shareProxyPortsSaved))
 
         if settings.shareProxyOnLocalNetworkEnabled, vpn.status == .connected {
-            _ = await vpn.sendProviderMessage("lan-proxy:restart")
+            let cmd = settings.proxyOnlyModeEnabled ? "proxy-bridge:restart" : "lan-proxy:restart"
+            _ = await vpn.sendProviderMessage(cmd)
         }
         readRuntime()
     }

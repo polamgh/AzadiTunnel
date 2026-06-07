@@ -23,6 +23,7 @@ struct SettingsView: View {
                     cdnFrontingSection
                 }
                 proxySection
+                proxyOnlySection
                 shareProxySection
                 behaviorSection
                 advancedSection
@@ -213,6 +214,49 @@ struct SettingsView: View {
                 SecureField("Password (optional)", text: $settings.upstreamProxyPassword)
             }
         }
+    }
+
+    private var proxyOnlySection: some View {
+        Section {
+            Toggle(L10n.t(.proxyOnlyEnableTitle), isOn: Binding(
+                get: { settings.proxyOnlyModeEnabled },
+                set: { newValue in
+                    settings.proxyOnlyModeEnabled = newValue
+                    persist("proxy_only_mode")
+                    SharedLogger.shared.log(newValue ? .proxyOnlyModeEnabled : .proxyOnlyModeDisabled)
+                    if newValue {
+                        SharedLogger.shared.log(.proxyOnlyWarningNotFullVPN)
+                    }
+                    Task { await reconnectIfConnected() }
+                }
+            ))
+            .accessibilityIdentifier("proxyOnlySettingsToggle")
+            Text(L10n.t(.proxyOnlyEnableDescription))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            Text(L10n.t(.proxyOnlyWarningShort))
+                .font(.footnote)
+                .foregroundStyle(.orange)
+            NavigationLink {
+                ProxyOnlySettingsView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t(.proxyOnlyRowTitle))
+                    Text(L10n.t(.proxyOnlyConfiguredAppsHint))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .accessibilityIdentifier("proxyOnlySettingsLink")
+        }
+    }
+
+    private func reconnectIfConnected() async {
+        guard VPNController.shared.status == .connected || VPNController.shared.status == .connecting else { return }
+        await VPNController.shared.disconnect()
+        try? await Task.sleep(nanoseconds: 800_000_000)
+        await VPNController.shared.connect()
     }
 
     private var shareProxySection: some View {

@@ -23,6 +23,8 @@ xcrun devicectl device install app --device "${DEVICE}" "${APP}" 2>&1 | tee -a "
 xcrun devicectl device process launch --device "${DEVICE}" --terminate-existing "${BUNDLE}" -- \
   -UITestMode -UITestClearLogs -UITestDisableSmartFallback \
   -UITestSetProtocol auto -UITestSetBeastMode 1 -UITestForceBootstrap -UITestAutoConnect \
+  -UITestSetProxyOnlyMode 0 -UITestSetSecureDNSMode off \
+  -UITestRunPostConnect \
   2>&1 | tee -a "${LOG_OUT}" || true
 
 sleep "${WAIT_SEC}"

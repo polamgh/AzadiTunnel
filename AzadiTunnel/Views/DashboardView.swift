@@ -133,6 +133,10 @@ struct DashboardView: View {
                 if autoConnect, configReady {
                     await vpn.connect()
                 }
+                if ProcessInfo.processInfo.arguments.contains("-UITestRunPostConnect") {
+                    try? await TaskSleep.seconds(8)
+                    await vpn.runPostConnectDiagnostics()
+                }
                 if ProcessInfo.processInfo.arguments.contains("-UITestVerifyFeatures") {
                     await UITestFeatureVerifier.runIfRequested()
                 }

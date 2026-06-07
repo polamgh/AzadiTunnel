@@ -7,7 +7,7 @@ import NetworkExtension
 import tun2socks
 #endif
 
-/// Resolves IPv4 UDP/53 via DNS-over-TCP through Psiphon SOCKS. AAAA is dropped so apps use IPv4 (tun2socks is IPv4-only).
+/// Owns tunnel DNS interception. Secure DNS modes resolve raw DNS wire queries before packets reach tun2socks.
 enum TunnelDnsForwarder {
     private static var dnsOkLogCount = 0
     private static var queue: DispatchQueue {
@@ -26,43 +26,171 @@ enum TunnelDnsForwarder {
         socksPort: Int,
         httpPort: Int
     ) -> Bool {
-        guard let parsed = parseDnsQuery(packet: packet),
-              let question = parseQuestion(parsed.dnsPayload) else { return false }
+        let settings = SharedSettingsStore.shared.appSettings
+        guard let parsed = parseDnsQuery(packet: packet) else { return false }
+        let queryId = SecureDNSResolver.queryId(from: parsed.dnsPayload)
+        guard let question = parseQuestion(parsed.dnsPayload) else {
+            if settings.secureDNSMode == .doh {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_BYPASS_DETECTED",
+                    detail: "id=\(queryId) reason=unparseable_dns_payload mode=doh"
+                )
+                if let formerr = buildMalformedDnsErrorResponse(query: parsed.dnsPayload, rcode: 1) {
+                    queue.async {
+                        let out = buildUdpResponsePacket(from: parsed, dnsPayload: formerr)
+                        packetFlow.writePackets([out], withProtocols: [protocolNumber])
+                        SharedLogger.shared.logRaw(
+                            "DNS_RESPONSE_SENT",
+                            detail: "id=\(queryId) secure=false formerr=unparseable_dns_payload"
+                        )
+                    }
+                    return true
+                }
+            }
+            return false
+        }
 
-        if question.qtype == 28 {
+        let dstIP = parsed.dstIP.map(String.init).joined(separator: ".")
+        SharedLogger.shared.logRaw(
+            "DNS_QUERY_RECEIVED",
+            detail: "id=\(queryId) qname=\(question.qname) type=\(dnsTypeName(question.qtype)) qtype=\(question.qtype) dst=\(dstIP):\(parsed.dstPort)"
+        )
+        SharedLogger.shared.logRaw(
+            "DNS_PACKET_RECEIVED",
+            detail: "id=\(queryId) qname=\(question.qname) qtype=\(question.qtype) dst=\(dstIP):\(parsed.dstPort)"
+        )
+        if question.qtype == 28, !SecureDNSConfiguration.isActive(settings) {
             queue.async {
-                let empty = buildEmptyAAAAResponse(query: parsed.dnsPayload, question: question)
+                let empty = buildEmptyNoErrorResponse(query: parsed.dnsPayload, question: question)
                 let out = buildUdpResponsePacket(from: parsed, dnsPayload: empty)
                 packetFlow.writePackets([out], withProtocols: [protocolNumber])
+                SharedLogger.shared.logRaw(
+                    "DNS_RESPONSE_SENT",
+                    detail: "id=\(queryId) secure=false qtype=AAAA_empty qname=\(question.qname)"
+                )
             }
             return true
         }
 
-        guard question.qtype == 1 else { return false }
+        if !SecureDNSConfiguration.isActive(settings), question.qtype != 1 {
+            return false
+        }
 
         queue.async {
             Task {
+                let settings = SharedSettingsStore.shared.appSettings
                 do {
-                    let responsePayload = try await resolve(
+                    let (responsePayload, secure) = try await resolve(
                         query: parsed.dnsPayload,
                         question: question,
                         socksHost: socksHost,
                         socksPort: socksPort,
-                        httpPort: httpPort
+                        httpPort: httpPort,
+                        settings: settings,
+                        queryId: queryId
                     )
                     let out = buildUdpResponsePacket(from: parsed, dnsPayload: responsePayload)
                     packetFlow.writePackets([out], withProtocols: [protocolNumber])
                     TunnelStatisticsStore.recordPacketBytes(down: 0, up: out.count)
                     dnsOkLogCount += 1
+                    SharedLogger.shared.logRaw(
+                        "DNS_RESPONSE_SENT",
+                        detail: "id=\(queryId) secure=\(secure) bytes=\(responsePayload.count) qname=\(question.qname)"
+                    )
                     if dnsOkLogCount <= 3 || dnsOkLogCount % 100 == 0 {
-                        SharedLogger.shared.log(.dnsForwardOk, detail: "bytes=\(responsePayload.count) n=\(dnsOkLogCount)")
+                        SharedLogger.shared.log(.dnsForwardOk, detail: "id=\(queryId) bytes=\(responsePayload.count) n=\(dnsOkLogCount) secure=\(secure)")
                     }
                 } catch {
-                    SharedLogger.shared.log(.dnsForwardFailed, detail: "error=\(error.localizedDescription)")
+                    SharedLogger.shared.log(.dnsForwardFailed, detail: "id=\(queryId) error=\(error.localizedDescription)")
+                    if SecureDNSConfiguration.isActive(settings), settings.blockCleartextDNS {
+                        let servfail = buildServFailResponse(query: parsed.dnsPayload, question: question)
+                        let out = buildUdpResponsePacket(from: parsed, dnsPayload: servfail)
+                        packetFlow.writePackets([out], withProtocols: [protocolNumber])
+                        SharedLogger.shared.logRaw(
+                            "DNS_RESPONSE_SENT",
+                            detail: "id=\(queryId) secure=false servfail=blocked_cleartext qname=\(question.qname)"
+                        )
+                    }
                 }
             }
         }
         return true
+    }
+
+    static func runTest(
+        socksHost: String,
+        socksPort: Int,
+        httpPort: Int
+    ) async -> (ok: Bool, detail: String) {
+        let settings = SharedSettingsStore.shared.appSettings
+        SharedLogger.shared.log(
+            .secureDnsTestStarted,
+            detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue)"
+        )
+        guard settings.secureDNSMode != .off else {
+            let detail = "mode=off"
+            SharedLogger.shared.log(.secureDnsTestFailed, detail: detail)
+            return (false, detail)
+        }
+
+        let query = SecureDNSConfiguration.exampleComWireQuery
+        guard let question = parseQuestion(query) else {
+            let detail = "reason=bad_test_query"
+            SharedLogger.shared.log(.secureDnsTestFailed, detail: detail)
+            return (false, detail)
+        }
+
+        let queryId = SecureDNSResolver.queryId(from: query)
+        SharedLogger.shared.logRaw(
+            "DNS_QUERY_RECEIVED",
+            detail: "id=\(queryId) qname=\(question.qname) type=\(dnsTypeName(question.qtype)) qtype=\(question.qtype) source=test"
+        )
+
+        do {
+            let (payload, secure) = try await resolve(
+                query: query,
+                question: question,
+                socksHost: socksHost,
+                socksPort: socksPort,
+                httpPort: httpPort,
+                settings: settings,
+                queryId: queryId
+            )
+            let parsed = ParsedQuery(
+                ipHeaderLength: 20,
+                srcIP: [10, 0, 0, 2],
+                dstIP: [10, 0, 0, 1],
+                srcPort: 53_000,
+                dstPort: 53,
+                dnsPayload: query
+            )
+            let packet = buildUdpResponsePacket(from: parsed, dnsPayload: payload)
+            SharedLogger.shared.logRaw(
+                "DNS_RESPONSE_SENT",
+                detail: "id=\(queryId) secure=\(secure) bytes=\(payload.count) qname=\(question.qname) source=test packet_bytes=\(packet.count)"
+            )
+
+            guard secure else {
+                let detail = "legacy_fallback bytes=\(payload.count)"
+                SharedLogger.shared.log(.secureDnsTestFailed, detail: detail)
+                return (false, detail)
+            }
+            let detail = "bytes=\(payload.count) secure=true"
+            SharedLogger.shared.log(.secureDnsTestOk, detail: detail)
+            SharedSettingsStore.shared.secureDNSWarning = nil
+            return (true, detail)
+        } catch {
+            if settings.blockCleartextDNS {
+                let servfail = buildServFailResponse(query: query, question: question)
+                SharedLogger.shared.logRaw(
+                    "DNS_RESPONSE_SENT",
+                    detail: "id=\(queryId) secure=false servfail=blocked_cleartext qname=\(question.qname) source=test bytes=\(servfail.count)"
+                )
+            }
+            let detail = "reason=\(error.localizedDescription)"
+            SharedLogger.shared.log(.secureDnsTestFailed, detail: detail)
+            return (false, detail)
+        }
     }
 
     private struct ParsedQuery {
@@ -149,8 +277,80 @@ enum TunnelDnsForwarder {
         question: ParsedQuestion,
         socksHost: String,
         socksPort: Int,
+        httpPort: Int,
+        settings: AppSettings,
+        queryId: UInt16
+    ) async throws -> (Data, Bool) {
+        if SecureDNSConfiguration.isActive(settings) {
+            do {
+                let result = try await SecureDNSResolver.resolve(
+                    wireQuery: query,
+                    queryId: queryId,
+                    qname: question.qname,
+                    settings: settings,
+                    socksPort: socksPort,
+                    httpPort: httpPort
+                )
+                SharedSettingsStore.shared.secureDNSWarning = nil
+                return (result.payload, result.usedSecurePath)
+            } catch {
+                if settings.blockCleartextDNS {
+                    SharedLogger.shared.log(.secureDnsCleartextBlocked, detail: "id=\(queryId) reason=\(error.localizedDescription)")
+                    SharedSettingsStore.shared.secureDNSWarning = "blocked"
+                    throw error
+                }
+                SharedLogger.shared.logRaw(
+                    "DNS_LEGACY_FALLBACK",
+                    detail: "id=\(queryId) qname=\(question.qname) reason=\(error.localizedDescription)"
+                )
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_FALLBACK_TO_LEGACY",
+                    detail: "id=\(queryId) reason=\(error.localizedDescription) qname=\(question.qname)"
+                )
+                let legacy = try await resolveLegacy(
+                    query: query,
+                    question: question,
+                    socksHost: socksHost,
+                    socksPort: socksPort,
+                    httpPort: httpPort
+                )
+                return (legacy, false)
+            }
+        }
+        let legacy = try await resolveLegacy(
+            query: query,
+            question: question,
+            socksHost: socksHost,
+            socksPort: socksPort,
+            httpPort: httpPort
+        )
+        return (legacy, false)
+    }
+
+    private static func dnsTypeName(_ qtype: UInt16) -> String {
+        switch qtype {
+        case 1: return "A"
+        case 2: return "NS"
+        case 5: return "CNAME"
+        case 15: return "MX"
+        case 16: return "TXT"
+        case 28: return "AAAA"
+        case 65: return "HTTPS"
+        default: return "TYPE\(qtype)"
+        }
+    }
+
+    private static func resolveLegacy(
+        query: Data,
+        question: ParsedQuestion,
+        socksHost: String,
+        socksPort: Int,
         httpPort: Int
     ) async throws -> Data {
+        guard question.qtype == 1 || question.qtype == 28 else {
+            return buildEmptyNoErrorResponse(query: query, question: question)
+        }
+
         let typeToken = question.qtype == 28 ? "AAAA" : "A"
         var components = URLComponents()
         components.scheme = "http"
@@ -168,8 +368,7 @@ enum TunnelDnsForwarder {
 
         let path = url.path + (url.query.map { "?\($0)" } ?? "")
         let backends: [(host: String, path: String)] = [
-            ("dns.google", path),
-            ("one.one.one.one", path)
+            ("dns.google", path)
         ]
 
         var lastError: Error = URLError(.cannotFindHost)
@@ -259,10 +458,38 @@ enum TunnelDnsForwarder {
         return withUnsafeBytes(of: &addr) { Data($0) }
     }
 
-    private static func buildEmptyAAAAResponse(query: Data, question: ParsedQuestion) -> Data {
+    private static func buildServFailResponse(query: Data, question: ParsedQuestion) -> Data {
         var response = Data(query.prefix(question.questionEnd))
         response[2] = 0x81
-        // NOERROR, zero answers — forces Happy Eyeballs to IPv4 quickly (tun2socks is v4-only).
+        response[3] = 0x82 // SERVFAIL
+        response[6] = 0
+        response[7] = 0
+        response[8] = 0
+        response[9] = 0
+        response[10] = 0
+        response[11] = 0
+        return response
+    }
+
+    private static func buildMalformedDnsErrorResponse(query: Data, rcode: UInt8) -> Data? {
+        guard query.count >= 12 else { return nil }
+        var response = query
+        response[2] = 0x81
+        response[3] = (response[3] & 0xf0) | (rcode & 0x0f)
+        response[6] = 0
+        response[7] = 0
+        response[8] = 0
+        response[9] = 0
+        response[10] = 0
+        response[11] = 0
+        return response
+    }
+
+    private static func buildEmptyNoErrorResponse(query: Data, question: ParsedQuestion) -> Data {
+        var response = Data(query.prefix(question.questionEnd))
+        response[2] = 0x81
+        // NOERROR, zero answers. For AAAA this nudges Happy Eyeballs to IPv4; for HTTPS/SVCB
+        // fallback it avoids emitting invalid typed answers when legacy DNS only has A/AAAA data.
         response[3] = 0x80
         response[6] = 0
         response[7] = 0

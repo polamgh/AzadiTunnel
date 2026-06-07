@@ -10,16 +10,25 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
     private let tcpSocket: TSTCPSocket
     private let proxyHost: String
     private let proxyPort: Int
+    private let httpPort: Int
     private let destHost: String
     private let destinationPort: UInt16
     private var upstream: NWConnection?
     private var pendingClientData: [Data] = []
     private var relayTask: Task<Void, Never>?
 
-    init(tcpSocket: TSTCPSocket, proxyHost: String, proxyPort: Int, destination: in_addr, destinationPort: UInt16) {
+    init(
+        tcpSocket: TSTCPSocket,
+        proxyHost: String,
+        proxyPort: Int,
+        httpPort: Int,
+        destination: in_addr,
+        destinationPort: UInt16
+    ) {
         self.tcpSocket = tcpSocket
         self.proxyHost = proxyHost
         self.proxyPort = proxyPort
+        self.httpPort = httpPort
         self.destinationPort = destinationPort
         var addr = destination
         self.destHost = String(cString: inet_ntoa(addr))
@@ -32,7 +41,8 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
                     proxyHost: proxyHost,
                     proxyPort: proxyPort,
                     targetHost: destHost,
-                    targetPort: destinationPort
+                    targetPort: destinationPort,
+                    httpPort: httpPort
                 )
                 upstream = conn
                 TunnelStatisticsStore.recordTcpRelaySession()

@@ -70,6 +70,14 @@ struct AppSettings: Codable, Equatable {
     /// break general internet / public-IP checks in this architecture (system proxy carries them).
     var bypassStrictModeEnabled: Bool = false
 
+    /// Optional encrypted DNS for full-tunnel mode. Off by default — no behavior change until enabled.
+    var secureDNSMode: SecureDNSMode = .off
+    var secureDNSProvider: SecureDNSProvider = .cloudflare
+    var customDoHURL: String = ""
+    var customDoTHost: String = ""
+    /// When Secure DNS is on and a query fails, block fallback to legacy DNS (SERVFAIL instead).
+    var blockCleartextDNS: Bool = false
+
     enum ConduitMode: String, Codable, CaseIterable, Identifiable {
         case auto
         case shiroCommunity = "shirokhorshid"

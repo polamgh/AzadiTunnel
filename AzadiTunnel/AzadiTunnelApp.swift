@@ -18,6 +18,8 @@ struct AzadiTunnelApp: App {
                 SharedLogger.shared.clear()
             }
             SharedSettingsStore.shared.isUITestMode = true
+            SharedSettingsStore.shared.vpnStatus = .disconnected
+            SharedSettingsStore.shared.psiphonTunnelEstablished = false
             var settings = SharedSettingsStore.shared.appSettings
             settings.hasAcceptedVPNDisclosure = true
             settings.hasAcceptedConnectionDisclaimer = true
@@ -51,6 +53,11 @@ struct AzadiTunnelApp: App {
             if args.contains("-UITestDisableSmartFallback") {
                 settings.smartFallbackChainEnabled = false
             }
+            let proxyOnlyRaw = Self.uiTestArgValue(args, flag: "-UITestSetProxyOnlyMode")
+                ?? ProcessInfo.processInfo.environment["UITEST_PROXY_ONLY_MODE"]
+            if let proxyOnlyRaw {
+                settings.proxyOnlyModeEnabled = proxyOnlyRaw == "1" || proxyOnlyRaw.lowercased() == "true"
+            }
             if args.contains("-UITestEnableSmartFallback") {
                 settings.smartFallbackChainEnabled = true
             }
@@ -58,6 +65,26 @@ struct AzadiTunnelApp: App {
                 settings.fallbackTimeoutCDN = 8
                 settings.fallbackTimeoutAutoBeast = 8
                 settings.fallbackTimeoutDirect = 120
+            }
+            let secureDnsModeRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSMode")
+            if let secureDnsModeRaw,
+               let mode = SecureDNSMode(rawValue: secureDnsModeRaw) {
+                settings.secureDNSMode = mode
+            }
+            let secureDnsProviderRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSProvider")
+            if let secureDnsProviderRaw,
+               let provider = SecureDNSProvider(rawValue: secureDnsProviderRaw) {
+                settings.secureDNSProvider = provider
+            }
+            let secureDnsBlockRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSBlockCleartext")
+                ?? ProcessInfo.processInfo.environment["UITEST_SECURE_DNS_BLOCK_CLEARTEXT"]
+            if let secureDnsBlockRaw {
+                settings.blockCleartextDNS = secureDnsBlockRaw == "1" || secureDnsBlockRaw.lowercased() == "true"
+            }
+            let secureDnsCustomDoH = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSCustomDoHURL")
+                ?? ProcessInfo.processInfo.environment["UITEST_SECURE_DNS_CUSTOM_DOH_URL"]
+            if let secureDnsCustomDoH {
+                settings.customDoHURL = secureDnsCustomDoH
             }
             if args.contains("-UITestAutoConnect") || args.contains("-UITestForceBootstrap") {
                 settings.conduitFallbackToPublic = false
@@ -68,7 +95,7 @@ struct AzadiTunnelApp: App {
             )
             SharedLogger.shared.logRaw(
                 "UITEST_SETTINGS",
-                detail: "protocol=\(settings.protocolSelection.rawValue) beast=\(settings.beastModeEnabled) limits=\(limits)"
+                detail: "protocol=\(settings.protocolSelection.rawValue) beast=\(settings.beastModeEnabled) proxy_only=\(settings.proxyOnlyModeEnabled) secure_dns=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue) block_cleartext=\(settings.blockCleartextDNS) limits=\(limits)"
             )
         }
         let forceBootstrap = args.contains("-UITestAutoConnect") || args.contains("-UITestForceBootstrap")

@@ -401,6 +401,34 @@ final class AppLanguageController: ObservableObject {
         case bypassStrictSection
         case bypassStrictToggle
         case bypassStrictDescription
+        case secureDnsRowTitle
+        case secureDnsRowSubtitle
+        case secureDnsNavTitle
+        case secureDnsModeSection
+        case secureDnsModeOff
+        case secureDnsModeDoh
+        case secureDnsModeDot
+        case secureDnsProviderSection
+        case secureDnsProviderCloudflare
+        case secureDnsProviderGoogle
+        case secureDnsProviderQuad9
+        case secureDnsProviderAdguard
+        case secureDnsProviderCustom
+        case secureDnsCustomDoHURL
+        case secureDnsCustomDoTHost
+        case secureDnsBlockCleartext
+        case secureDnsBlockCleartextHint
+        case secureDnsTestButton
+        case secureDnsTestRunning
+        case secureDnsTestOk
+        case secureDnsTestFailed
+        case secureDnsTestConnectFirst
+        case secureDnsWarningSection
+        case secureDnsDefaultOffNote
+        case secureDnsReconnectNote
+        case secureDnsProxyOnlyNote
+        case secureDnsBlockedWarning
+        case secureDnsTestHint
     }
 
     private static var extraEn: [L10nKey: String] = [:]

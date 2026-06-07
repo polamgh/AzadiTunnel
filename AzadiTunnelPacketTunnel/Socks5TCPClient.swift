@@ -7,11 +7,12 @@ import tun2socks
 
 /// Minimal SOCKS5 TCP CONNECT client (RFC 1928) to Psiphon local proxy.
 enum Socks5TCPClient {
-    enum Socks5Error: Swift.Error {
+    enum Socks5Error: LocalizedError {
         case handshakeFailed
         case connectFailed
         case connectRejected(rep: UInt8)
         case httpNoHeaders
+        case timeout(String)
 
         var errorDescription: String? {
             switch self {
@@ -19,8 +20,32 @@ enum Socks5TCPClient {
             case .connectFailed: return "connect_failed"
             case .connectRejected(let rep): return "connect_rejected:\(rep)"
             case .httpNoHeaders: return "http_no_headers"
+            case .timeout(let stage): return "timeout:\(stage)"
             }
         }
+    }
+
+    /// Psiphon SOCKS rejects CONNECT to well-known resolver literals; use anycast edge instead.
+    private static let resolverIPOverrides: [String: String] = [
+        "1.1.1.1": "162.159.195.42",
+        "1.0.0.1": "162.159.195.42",
+        "8.8.8.8": "142.250.80.46",
+        "8.8.4.4": "142.250.80.46",
+    ]
+
+    private static let hostnameOverrides: [String: String] = [
+        "dns.google": "142.250.80.46",
+        "one.one.one.one": "162.159.195.42",
+        "cloudflare-dns.com": "162.159.195.42",
+        "dns.quad9.net": "9.9.9.9",
+        "dns.adguard-dns.com": "94.140.14.14",
+        "connectivitycheck.gstatic.com": "142.250.80.78",
+    ]
+
+    /// Maps SOCKS CONNECT targets so Psiphon can reach public DNS / resolver hosts.
+    static func socksTargetHost(for host: String) -> String {
+        if let mapped = resolverIPOverrides[host] { return mapped }
+        return hostnameOverrides[host.lowercased()] ?? host
     }
 
     /// DNS query over TCP (RFC 7766) via SOCKS to a resolver outside tunnel DNS IPs.
@@ -43,10 +68,10 @@ enum Socks5TCPClient {
         framed.append(UInt8(len & 0xff))
         framed.append(query)
         try await sendAll(connection, data: framed)
-        let lenHeader = try await receiveExact(connection, count: 2)
+        let lenHeader = try await receiveExact(connection, count: 2, timeout: 8)
         let respLen = Int(UInt16(lenHeader[0]) << 8 | UInt16(lenHeader[1]))
         guard respLen > 0, respLen <= 4096 else { throw Socks5Error.connectFailed }
-        return try await receiveExact(connection, count: respLen)
+        return try await receiveExact(connection, count: respLen, timeout: 8)
     }
 
     /// HTTP GET to `host` through Psiphon SOCKS (full CONNECT reply consumed before reading body).
@@ -70,170 +95,208 @@ enum Socks5TCPClient {
         return try await readHttpBody(connection)
     }
 
-    /// Avoid tunnel DNS IPs (1.1.1.1 / 8.8.8.8) — Psiphon SOCKS rejects CONNECT to them (rep=1).
-    private static func socksConnectHost(for host: String) -> String {
-        if parseIPv4(host) != nil { return host }
-        switch host {
-        case "dns.google": return "142.250.80.46"
-        case "one.one.one.one": return "162.159.195.42"
-        case "connectivitycheck.gstatic.com": return "142.250.80.78"
-        default: return host
-        }
-    }
-
     static func openConnection(
         proxyHost: String,
         proxyPort: Int,
         targetHost: String,
-        targetPort: UInt16
+        targetPort: UInt16,
+        httpPort: Int = 0,
+        useHostOverrides: Bool = true,
+        readyTimeout: TimeInterval = 5,
+        methodTimeout: TimeInterval = 5,
+        connectReplyTimeout: TimeInterval = 8
     ) async throws -> NWConnection {
+        _ = httpPort
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(proxyHost),
             port: NWEndpoint.Port(integerLiteral: UInt16(proxyPort))
         )
         let connection = NWConnection(to: endpoint, using: .tcp)
-        try await waitReady(connection)
+        try await waitReady(connection, timeout: readyTimeout)
 
         try await sendAll(connection, data: Data([0x05, 0x01, 0x00]))
-        let methodReply = try await receiveExact(connection, count: 2)
+        let methodReply = try await receiveExact(connection, count: 2, timeout: methodTimeout)
         guard methodReply[0] == 0x05, methodReply[1] == 0x00 else {
             SharedLogger.shared.log(.internetTestFailed, detail: "socks_method rep=\(methodReply.map { String($0) }.joined(separator: ","))")
             throw Socks5Error.handshakeFailed
         }
 
-        let connectHost = socksConnectHost(for: targetHost)
+        let connectHost = useHostOverrides ? socksTargetHost(for: targetHost) : targetHost
         var connect = Data([0x05, 0x01, 0x00])
         if let ipv4 = parseIPv4(connectHost) {
             connect.append(contentsOf: [0x01])
             connect.append(contentsOf: ipv4)
         } else {
             connect.append(0x03)
-            guard let hostData = targetHost.data(using: .utf8) else { throw Socks5Error.connectFailed }
+            guard let hostData = connectHost.data(using: .utf8) else { throw Socks5Error.connectFailed }
             connect.append(UInt8(hostData.count))
             connect.append(hostData)
         }
         connect.append(UInt8(targetPort >> 8))
         connect.append(UInt8(targetPort & 0xff))
         try await sendAll(connection, data: connect)
-        try await consumeConnectReply(connection)
+        try await consumeConnectReply(connection, timeout: connectReplyTimeout)
         return connection
     }
 
     /// Read and discard the full RFC 1928 CONNECT reply so later reads are DNS payload only.
-    private static func consumeConnectReply(_ connection: NWConnection) async throws {
-        let header = try await receiveExact(connection, count: 4)
-        guard header[0] == 0x05 else { throw Socks5Error.connectFailed }
-        guard header[1] == 0x00 else {
-            SharedLogger.shared.log(.internetTestFailed, detail: "socks_connect rep=\(header[1])")
+    private static func consumeConnectReply(_ connection: NWConnection, timeout: TimeInterval? = nil) async throws {
+        let header = try await receiveExact(connection, count: 4, timeout: timeout)
+        guard header[0] == 0x05, header[1] == 0x00 else {
             throw Socks5Error.connectRejected(rep: header[1])
         }
-        let addressBytes: Int
-        switch header[3] {
-        case 0x01: addressBytes = 4 + 2
+        let addrType = header[3]
+        switch addrType {
+        case 0x01:
+            _ = try await receiveExact(connection, count: 4 + 2, timeout: timeout)
         case 0x03:
-            let lenChunk = try await receiveExact(connection, count: 1)
-            addressBytes = Int(lenChunk[0]) + 2
-        case 0x04: addressBytes = 16 + 2
-        default: throw Socks5Error.connectFailed
+            let len = Int(try await receiveExact(connection, count: 1, timeout: timeout)[0])
+            _ = try await receiveExact(connection, count: len + 2, timeout: timeout)
+        case 0x04:
+            _ = try await receiveExact(connection, count: 16 + 2, timeout: timeout)
+        default:
+            throw Socks5Error.connectFailed
         }
-        guard addressBytes > 0 else { return }
-        _ = try await receiveExact(connection, count: addressBytes)
-    }
-
-    private static func receiveExact(_ connection: NWConnection, count: Int) async throws -> Data {
-        var buffer = Data()
-        while buffer.count < count {
-            let chunk = try await receiveChunk(connection, maxLength: count - buffer.count)
-            buffer.append(chunk)
-        }
-        return buffer
-    }
-
-    private static func receiveChunk(_ connection: NWConnection, maxLength: Int) async throws -> Data {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Data, any Error>) in
-            connection.receive(minimumIncompleteLength: 1, maximumLength: maxLength) { data, _, _, error in
-                if let error {
-                    cont.resume(throwing: error)
-                } else if let data, !data.isEmpty {
-                    cont.resume(returning: data)
-                } else {
-                    cont.resume(throwing: Socks5Error.handshakeFailed)
-                }
-            }
-        }
-    }
-
-    private static var socksQueue: DispatchQueue {
-#if canImport(tun2socks)
-        TSIPStack.stack.processQueue
-#else
-        DispatchQueue(label: "com.polamgh.ali.AzadiTunnel.socks5")
-#endif
     }
 
     private static func parseIPv4(_ host: String) -> [UInt8]? {
-        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
-        guard parts.count == 4 else { return nil }
-        var bytes: [UInt8] = []
-        for part in parts {
-            guard let n = UInt8(part), n <= 255 else { return nil }
-            bytes.append(n)
-        }
-        return bytes
-    }
-
-    private static func waitReady(_ connection: NWConnection) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, any Error>) in
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    connection.stateUpdateHandler = nil
-                    cont.resume()
-                case .failed(let err):
-                    connection.stateUpdateHandler = nil
-                    cont.resume(throwing: err)
-                case .cancelled:
-                    connection.stateUpdateHandler = nil
-                    cont.resume(throwing: Socks5Error.handshakeFailed)
-                default:
-                    break
-                }
-            }
-            connection.start(queue: Self.socksQueue)
-        }
+        var addr = in_addr()
+        guard host.withCString({ inet_aton($0, &addr) }) == 1 else { return nil }
+        let raw = withUnsafeBytes(of: addr.s_addr) { Array($0) }
+        return raw
     }
 
     static func relaySend(_ connection: NWConnection, data: Data) async throws {
         try await sendAll(connection, data: data)
     }
 
-    static func relayReceive(_ connection: NWConnection, maxLength: Int) async throws -> Data {
-        try await receiveChunk(connection, maxLength: maxLength)
+    static func relayReceive(_ connection: NWConnection, maxLength: Int, timeout: TimeInterval? = nil) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            let gate = ContinuationGate<Data>()
+            if let timeout {
+                gate.scheduleTimeout(after: timeout) {
+                    connection.cancel()
+                    _ = gate.resume(cont, throwing: Socks5Error.timeout("receive"))
+                }
+            }
+            connection.receive(minimumIncompleteLength: 1, maximumLength: maxLength) { data, _, _, err in
+                if let err {
+                    _ = gate.resume(cont, throwing: err)
+                } else if let data, !data.isEmpty {
+                    _ = gate.resume(cont, returning: data)
+                } else {
+                    _ = gate.resume(cont, throwing: Socks5Error.connectFailed)
+                }
+            }
+        }
+    }
+
+    private static func waitReady(_ connection: NWConnection, timeout: TimeInterval? = nil) async throws {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            let gate = ContinuationGate<Void>()
+            if let timeout {
+                gate.scheduleTimeout(after: timeout) {
+                    connection.stateUpdateHandler = nil
+                    connection.cancel()
+                    _ = gate.resume(cont, throwing: Socks5Error.timeout("ready"))
+                }
+            }
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    connection.stateUpdateHandler = nil
+                    _ = gate.resume(cont, returning: ())
+                case .failed(let err):
+                    connection.stateUpdateHandler = nil
+                    _ = gate.resume(cont, throwing: err)
+                case .cancelled:
+                    connection.stateUpdateHandler = nil
+                    _ = gate.resume(cont, throwing: Socks5Error.connectFailed)
+                default:
+                    break
+                }
+            }
+            connection.start(queue: .global(qos: .userInitiated))
+        }
     }
 
     private static func sendAll(_ connection: NWConnection, data: Data) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, any Error>) in
-            connection.send(content: data, completion: .contentProcessed { error in
-                if let error { cont.resume(throwing: error) }
-                else { cont.resume() }
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+            connection.send(content: data, completion: .contentProcessed { err in
+                if let err { cont.resume(throwing: err) } else { cont.resume() }
             })
         }
     }
 
+    private static func receiveExact(_ connection: NWConnection, count: Int, timeout: TimeInterval? = nil) async throws -> Data {
+        var buffer = Data()
+        while buffer.count < count {
+            let chunk = try await relayReceive(connection, maxLength: count - buffer.count, timeout: timeout)
+            buffer.append(chunk)
+        }
+        return buffer
+    }
+
     private static func readHttpBody(_ connection: NWConnection) async throws -> Data {
         var buffer = Data()
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(20)
         while buffer.count < 65536, Date() < deadline {
-            let chunk = try await receiveChunk(connection, maxLength: 65536 - buffer.count)
-            if !chunk.isEmpty { buffer.append(chunk) }
+            let chunk = try await relayReceive(connection, maxLength: 4096, timeout: 8)
+            if chunk.isEmpty { break }
+            buffer.append(chunk)
             if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
                 return buffer.subdata(in: range.upperBound..<buffer.count)
-            }
-            if chunk.isEmpty {
-                try await Task.sleep(nanoseconds: 50_000_000)
             }
         }
         throw Socks5Error.httpNoHeaders
     }
 
+    private final class ContinuationGate<Value>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var didResume = false
+        private var timeoutItem: DispatchWorkItem?
+
+        func scheduleTimeout(after timeout: TimeInterval, _ body: @escaping @Sendable () -> Void) {
+            let item = DispatchWorkItem(block: body)
+            lock.lock()
+            if didResume {
+                lock.unlock()
+                item.cancel()
+                return
+            }
+            timeoutItem = item
+            lock.unlock()
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout, execute: item)
+        }
+
+        func resume(_ continuation: CheckedContinuation<Value, Error>, returning value: Value) -> Bool {
+            lock.lock()
+            if didResume {
+                lock.unlock()
+                return false
+            }
+            didResume = true
+            let item = timeoutItem
+            timeoutItem = nil
+            lock.unlock()
+            item?.cancel()
+            continuation.resume(returning: value)
+            return true
+        }
+
+        func resume(_ continuation: CheckedContinuation<Value, Error>, throwing error: Error) -> Bool {
+            lock.lock()
+            if didResume {
+                lock.unlock()
+                return false
+            }
+            didResume = true
+            let item = timeoutItem
+            timeoutItem = nil
+            lock.unlock()
+            item?.cancel()
+            continuation.resume(throwing: error)
+            return true
+        }
+    }
 }

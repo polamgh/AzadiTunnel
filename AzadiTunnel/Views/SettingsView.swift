@@ -27,6 +27,7 @@ struct SettingsView: View {
                 proxyOnlySection
                 shareProxySection
                 bypassSection
+                secureDnsSection
                 behaviorSection
                 advancedSection
                 logsSection
@@ -305,6 +306,22 @@ struct SettingsView: View {
         Section("Advanced transport") {
             Toggle("Disable timeouts", isOn: $settings.disableTimeouts)
                 .onChange(of: settings.disableTimeouts) { _ in persist("disable_timeouts") }
+        }
+    }
+
+    private var secureDnsSection: some View {
+        Section {
+            NavigationLink {
+                SecureDNSSettingsView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t(.secureDnsRowTitle))
+                    Text(L10n.t(.secureDnsRowSubtitle))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("secureDnsRow")
         }
     }
 

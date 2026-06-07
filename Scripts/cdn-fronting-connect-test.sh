@@ -65,7 +65,12 @@ for line in (cdn_cfg, limits, established, connected, internet):
     if line:
         print(line)
 
-cdn_protocols = ("FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-HTTP-OSSH", "FRONTED-MEEK-QUIC-OSSH")
+cdn_protocols = (
+    "FRONTED-MEEK-CDN-OSSH",
+    "FRONTED-MEEK-CDN-HTTP-OSSH",
+    "FRONTED-MEEK-CDN-QUIC-OSSH",
+    "FRONTED-MEEK-QUIC-OSSH",
+)
 if not cdn_cfg or "enabled=true" not in cdn_cfg:
     print("FAIL: CDN_FRONTING_CONFIG enabled=true missing")
     sys.exit(1)

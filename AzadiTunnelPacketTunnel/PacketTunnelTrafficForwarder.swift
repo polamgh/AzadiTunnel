@@ -76,7 +76,11 @@ final class PacketTunnelTrafficForwarder {
                 }
                 self.packetFlow.writePackets(packets, withProtocols: protocols)
             }
-            let delegate = SocksTun2SocksDelegate(socksHost: self.socksHost, socksPort: self.socksPort)
+            let delegate = SocksTun2SocksDelegate(
+                socksHost: self.socksHost,
+                socksPort: self.socksPort,
+                httpPort: self.httpPort
+            )
             self.socksStackDelegate = delegate
             stack.delegate = delegate
             stack.resumeTimer()
@@ -121,6 +125,15 @@ final class PacketTunnelTrafficForwarder {
                     if Self.tunTcpSeen <= 5 || Self.tunTcpSeen % 50 == 0 {
                         SharedLogger.shared.logRaw("TUN_TCP_PKT", detail: "n=\(Self.tunTcpSeen) len=\(packet.count)")
                     }
+                    if SharedSettingsStore.shared.appSettings.secureDNSMode == .doh,
+                       let ports = Self.tcpPorts(packet),
+                       ports.dst == 53 || ports.src == 53 {
+                        SharedLogger.shared.logRaw(
+                            "SECURE_DNS_BYPASS_DETECTED",
+                            detail: "reason=tcp_53_cleartext_blocked src_port=\(ports.src) dst_port=\(ports.dst) mode=doh"
+                        )
+                        continue
+                    }
                 }
 
                 let down = packet.count
@@ -147,16 +160,27 @@ final class PacketTunnelTrafficForwarder {
             self.scheduleReadLoop(handler: handler)
         }
     }
+
+    private static func tcpPorts(_ packet: Data) -> (src: UInt16, dst: UInt16)? {
+        guard packet.count >= 20, packet[0] >> 4 == 4, packet[9] == 6 else { return nil }
+        let ihl = Int(packet[0] & 0x0f) * 4
+        guard packet.count >= ihl + 4 else { return nil }
+        let src = UInt16(packet[ihl]) << 8 | UInt16(packet[ihl + 1])
+        let dst = UInt16(packet[ihl + 2]) << 8 | UInt16(packet[ihl + 3])
+        return (src, dst)
+    }
 }
 
 #if canImport(tun2socks)
 private final class SocksTun2SocksDelegate: NSObject, TSIPStackDelegate {
     private let socksHost: String
     private let socksPort: Int
+    private let httpPort: Int
 
-    init(socksHost: String, socksPort: Int) {
+    init(socksHost: String, socksPort: Int, httpPort: Int) {
         self.socksHost = socksHost
         self.socksPort = socksPort
+        self.httpPort = httpPort
     }
 
     func didAcceptTCPSocket(_ sock: TSTCPSocket) {
@@ -175,6 +199,7 @@ private final class SocksTun2SocksDelegate: NSObject, TSIPStackDelegate {
             tcpSocket: sock,
             proxyHost: socksHost,
             proxyPort: socksPort,
+            httpPort: httpPort,
             destination: peer,
             destinationPort: peerPort
         )

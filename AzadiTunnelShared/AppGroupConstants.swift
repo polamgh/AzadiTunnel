@@ -33,6 +33,10 @@ enum AppGroupConstants {
     static let bypassDomainsUpdatedKey = "bypass_domains_updated_at"
     /// Route count the extension actually applied to `excludedRoutes` (published for UI).
     static let bypassRoutesAppliedCountKey = "bypass_routes_applied_count"
+
+    /// User-visible Secure DNS warning when cleartext DNS is blocked after resolver failure.
+    static let secureDNSWarningKey = "secure_dns_warning"
+    static let secureDNSCloudflareValidationKey = "secure_dns_cloudflare_validation"
 }
 
 enum SharedLogEvent: String, CaseIterable {
@@ -136,6 +140,16 @@ enum SharedLogEvent: String, CaseIterable {
     case proxyOnlyDisableOffered = "PROXY_ONLY_DISABLE_OFFERED"
     case proxyOnlyDisabledByUser = "PROXY_ONLY_DISABLED_BY_USER"
     case proxyOnlyStartCancelledNoWifi = "PROXY_ONLY_START_CANCELLED_NO_WIFI"
+    case secureDnsDisabled = "SECURE_DNS_DISABLED"
+    case secureDnsEnabled = "SECURE_DNS_ENABLED"
+    case secureDnsDohQueryOk = "SECURE_DNS_DOH_QUERY_OK"
+    case secureDnsDohQueryFailed = "SECURE_DNS_DOH_QUERY_FAILED"
+    case secureDnsDotQueryOk = "SECURE_DNS_DOT_QUERY_OK"
+    case secureDnsDotQueryFailed = "SECURE_DNS_DOT_QUERY_FAILED"
+    case secureDnsTestStarted = "SECURE_DNS_TEST_STARTED"
+    case secureDnsTestOk = "SECURE_DNS_TEST_OK"
+    case secureDnsTestFailed = "SECURE_DNS_TEST_FAILED"
+    case secureDnsCleartextBlocked = "SECURE_DNS_CLEAR_TEXT_BLOCKED"
     case bypassIranEnabled = "BYPASS_IRAN_ENABLED"
     case bypassIranDisabled = "BYPASS_IRAN_DISABLED"
     case bypassIranListFetchStarted = "BYPASS_IRAN_LIST_FETCH_STARTED"

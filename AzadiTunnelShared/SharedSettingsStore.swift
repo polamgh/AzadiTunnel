@@ -272,6 +272,29 @@ final class SharedSettingsStore {
         set { defaults?.set(newValue, forKey: AppGroupConstants.bypassRoutesAppliedCountKey) }
     }
 
+    /// Shown in Secure DNS settings when `blockCleartextDNS` prevents fallback after resolver failure.
+    var secureDNSWarning: String? {
+        get { defaults?.string(forKey: AppGroupConstants.secureDNSWarningKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: AppGroupConstants.secureDNSWarningKey)
+            } else {
+                defaults?.removeObject(forKey: AppGroupConstants.secureDNSWarningKey)
+            }
+        }
+    }
+
+    var secureDNSCloudflareValidation: String? {
+        get { defaults?.string(forKey: AppGroupConstants.secureDNSCloudflareValidationKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: AppGroupConstants.secureDNSCloudflareValidationKey)
+            } else {
+                defaults?.removeObject(forKey: AppGroupConstants.secureDNSCloudflareValidationKey)
+            }
+        }
+    }
+
     func installPsiphonConfig(json: String, serverEntries: String?, bundled: Bool = true) throws {
         let hasEntries = !(serverEntries ?? "").isEmpty
         let normalized = try PsiphonConfigValidator.normalizedJSON(

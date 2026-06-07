@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct SecureDNSSettingsView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var lang = AppLanguageController.shared
     @ObservedObject private var vpn = VPNController.shared
 
@@ -69,34 +70,35 @@ struct SecureDNSSettingsView: View {
     }
 
     private var modeSection: some View {
-        Section(L10n.t(.secureDnsModeSection)) {
-            Picker(L10n.t(.secureDnsModeSection), selection: $settings.secureDNSMode) {
-                Text(L10n.t(.secureDnsModeOff)).tag(SecureDNSMode.off)
-                Text(L10n.t(.secureDnsModeDoh)).tag(SecureDNSMode.doh)
-                Text(L10n.t(.secureDnsModeDot)).tag(SecureDNSMode.dot)
+        Section {
+            if settings.secureDNSMode != .off {
+                HStack {
+                    Text(L10n.t(.secureDnsActiveSelection))
+                    Spacer()
+                    Text(activeSelectionSummary)
+                        .foregroundStyle(AppTheme.accent)
+                        .multilineTextAlignment(.trailing)
+                }
             }
-            .pickerStyle(.segmented)
-            .onChange(of: settings.secureDNSMode) { _ in
-                persist("secure_dns_mode")
-                Task { await reconnectIfConnected() }
+
+            ForEach(SecureDNSMode.allCases) { mode in
+                modeOptionRow(mode)
             }
-            .accessibilityIdentifier("secureDnsModePicker")
+        } header: {
+            Text(L10n.t(.secureDnsModeSection))
         }
+        .accessibilityIdentifier("secureDnsModePicker")
     }
 
     private var providerSection: some View {
-        Section(L10n.t(.secureDnsProviderSection)) {
-            Picker(L10n.t(.secureDnsProviderSection), selection: $settings.secureDNSProvider) {
-                ForEach(SecureDNSProvider.allCases) { provider in
-                    Text(providerLabel(provider)).tag(provider)
-                }
+        Section {
+            ForEach(SecureDNSProvider.allCases) { provider in
+                providerOptionRow(provider)
             }
-            .onChange(of: settings.secureDNSProvider) { _ in
-                persist("secure_dns_provider")
-                Task { await reconnectIfConnected() }
-            }
-            .accessibilityIdentifier("secureDnsProviderPicker")
+        } header: {
+            Text(L10n.t(.secureDnsProviderSection))
         }
+        .accessibilityIdentifier("secureDnsProviderPicker")
     }
 
     private var customSection: some View {
@@ -139,7 +141,10 @@ struct SecureDNSSettingsView: View {
             Button {
                 Task { await runTest() }
             } label: {
-                Text(testRunning ? L10n.t(.secureDnsTestRunning) : L10n.t(.secureDnsTestButton))
+                HStack {
+                    Image(systemName: "checkmark.shield")
+                    Text(testRunning ? L10n.t(.secureDnsTestRunning) : L10n.t(.secureDnsTestButton))
+                }
             }
             .disabled(testRunning || settings.secureDNSMode == .off)
             .accessibilityIdentifier("secureDnsTestButton")
@@ -160,6 +165,124 @@ struct SecureDNSSettingsView: View {
         }
     }
 
+    private var activeSelectionSummary: String {
+        "\(modeTitle(settings.secureDNSMode)) · \(providerLabel(settings.secureDNSProvider))"
+    }
+
+    private func modeOptionRow(_ mode: SecureDNSMode) -> some View {
+        let selected = settings.secureDNSMode == mode
+        return Button {
+            selectMode(mode)
+        } label: {
+            HStack(spacing: 14) {
+                modeIconBadge(mode, selected: selected)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(modeTitle(mode))
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                    Text(modeDetail(mode))
+                        .font(.caption)
+                        .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? AppTheme.accent : Color.secondary.opacity(0.35))
+            }
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func providerOptionRow(_ provider: SecureDNSProvider) -> some View {
+        let selected = settings.secureDNSProvider == provider
+        return Button {
+            selectProvider(provider)
+        } label: {
+            HStack(spacing: 14) {
+                providerIconBadge(provider, selected: selected)
+                Text(providerLabel(provider))
+                    .font(.body.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                Spacer(minLength: 8)
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selected ? AppTheme.accent : Color.secondary.opacity(0.35))
+            }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func modeIconBadge(_ mode: SecureDNSMode, selected: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    selected
+                        ? AppTheme.accent.opacity(colorScheme == .dark ? 0.24 : 0.14)
+                        : Color.secondary.opacity(0.12)
+                )
+                .frame(width: 40, height: 40)
+            Image(systemName: modeIconName(mode))
+                .font(.body.weight(.semibold))
+                .foregroundStyle(selected ? AppTheme.accent : AppTheme.secondaryText(for: colorScheme))
+        }
+    }
+
+    private func providerIconBadge(_ provider: SecureDNSProvider, selected: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(
+                    selected
+                        ? AppTheme.accent.opacity(colorScheme == .dark ? 0.24 : 0.14)
+                        : Color.secondary.opacity(0.12)
+                )
+                .frame(width: 34, height: 34)
+            Image(systemName: providerIconName(provider))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(selected ? AppTheme.accent : AppTheme.secondaryText(for: colorScheme))
+        }
+    }
+
+    private func modeIconName(_ mode: SecureDNSMode) -> String {
+        switch mode {
+        case .off: return "power"
+        case .doh: return "lock.shield"
+        case .dot: return "network.badge.shield.half.filled"
+        }
+    }
+
+    private func providerIconName(_ provider: SecureDNSProvider) -> String {
+        switch provider {
+        case .cloudflare: return "cloud.fill"
+        case .google: return "globe"
+        case .quad9: return "9.circle.fill"
+        case .adguard: return "shield.lefthalf.filled"
+        case .custom: return "slider.horizontal.3"
+        }
+    }
+
+    private func modeTitle(_ mode: SecureDNSMode) -> String {
+        switch mode {
+        case .off: return L10n.t(.secureDnsModeOff)
+        case .doh: return L10n.t(.secureDnsModeDoh)
+        case .dot: return L10n.t(.secureDnsModeDot)
+        }
+    }
+
+    private func modeDetail(_ mode: SecureDNSMode) -> String {
+        switch mode {
+        case .off: return L10n.t(.secureDnsModeOffDetail)
+        case .doh: return L10n.t(.secureDnsModeDohDetail)
+        case .dot: return L10n.t(.secureDnsModeDotDetail)
+        }
+    }
+
     private func providerLabel(_ provider: SecureDNSProvider) -> String {
         switch provider {
         case .cloudflare: return L10n.t(.secureDnsProviderCloudflare)
@@ -168,6 +291,20 @@ struct SecureDNSSettingsView: View {
         case .adguard: return L10n.t(.secureDnsProviderAdguard)
         case .custom: return L10n.t(.secureDnsProviderCustom)
         }
+    }
+
+    private func selectMode(_ mode: SecureDNSMode) {
+        guard settings.secureDNSMode != mode else { return }
+        settings.secureDNSMode = mode
+        persist("secure_dns_mode")
+        Task { await reconnectIfConnected() }
+    }
+
+    private func selectProvider(_ provider: SecureDNSProvider) {
+        guard settings.secureDNSProvider != provider else { return }
+        settings.secureDNSProvider = provider
+        persist("secure_dns_provider")
+        Task { await reconnectIfConnected() }
     }
 
     private func persist(_ key: String) {

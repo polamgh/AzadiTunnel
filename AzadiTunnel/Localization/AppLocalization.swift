@@ -408,6 +408,10 @@ final class AppLanguageController: ObservableObject {
         case secureDnsModeOff
         case secureDnsModeDoh
         case secureDnsModeDot
+        case secureDnsModeOffDetail
+        case secureDnsModeDohDetail
+        case secureDnsModeDotDetail
+        case secureDnsActiveSelection
         case secureDnsProviderSection
         case secureDnsProviderCloudflare
         case secureDnsProviderGoogle

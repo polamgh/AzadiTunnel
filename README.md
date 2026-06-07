@@ -2,6 +2,11 @@
 
 Open-source iOS VPN client licensed under **GNU GPLv3**. It uses **[psiphon-tunnel-core](https://github.com/shirokhorshid/psiphon-tunnel-core)** (also GPLv3) for the packet-tunnel VPN stack.
 
+| | |
+|---|---|
+| **Source code** | [github.com/polamgh/AzadiTunnel](https://github.com/polamgh/AzadiTunnel) |
+| **App Store** | [AzadiTunnel on the App Store](https://apps.apple.com/ca/app/azaditunnel/id6776486891) |
+
 AzadiTunnel is **not** developed, endorsed, or affiliated with Psiphon Inc. Psiphon® is a registered trademark of Psiphon Inc.
 
 Connect flow follows [Shiro Khorshid / Psiphon iOS samples](https://github.com/shirokhorshid/psiphon-tunnel-core): bundled `psiphon-config.json` + `psiphon-embedded-server-entries.txt`, copied to the App Group on first launch. Tap **Connect** — no JSON import required.

@@ -284,6 +284,52 @@ final class AppLanguageController: ObservableObject {
         case supportSubscriptionDisclaimer
         case supportManageSubscriptions
         case supportFreeBadge
+        case shareProxyRowTitle
+        case shareProxyRowSubtitle
+        case shareProxyNavTitle
+        case shareProxyEnableTitle
+        case shareProxyEnableDescription
+        case shareProxyTrustedNetworkWarning
+        case shareProxyStatusSection
+        case shareProxyStatusRunning
+        case shareProxyStatusStopped
+        case shareProxyStatusVpnDisconnected
+        case shareProxyStatusNoWifi
+        case shareProxyStatusPortInUse
+        case shareProxyStatusFailed
+        case shareProxyWifiIP
+        case shareProxyNoWifiIP
+        case shareProxyNoWifiHint
+        case shareProxyAddressSection
+        case shareProxyHttpAddressTitle
+        case shareProxySocksAddressTitle
+        case shareProxyAddressUnavailable
+        case shareProxyPortsSection
+        case shareProxyHttpPort
+        case shareProxySocksPort
+        case shareProxySavePorts
+        case shareProxyPortsSaved
+        case shareProxyPortOutOfRange
+        case shareProxyPortsMustDiffer
+        case shareProxyPortHint
+        case shareProxyAuthSection
+        case shareProxyAuthToggle
+        case shareProxyUsername
+        case shareProxyPassword
+        case shareProxyNoAuthWarning
+        case shareProxySecuritySection
+        case shareProxySecurityWarning
+        case shareProxyInstructionsSection
+        case shareProxyHowToiPhone
+        case shareProxyHowToAndroid
+        case shareProxyHowToWindows
+        case shareProxyHowToAndroidTV
+        case shareProxyInstructionsiPhone
+        case shareProxyInstructionsAndroid
+        case shareProxyInstructionsWindows
+        case shareProxyInstructionsAndroidTV
+        case shareProxySocksNoteTitle
+        case shareProxySocksNoteBody
     }
 
     private static var extraEn: [L10nKey: String] = [:]

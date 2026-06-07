@@ -138,6 +138,50 @@ final class SharedSettingsStore {
         set { defaults?.set(newValue, forKey: AppGroupConstants.psiphonTunnelEstablishedKey) }
     }
 
+    /// LAN proxy bridge runtime status (published by extension, observed by UI).
+    var lanProxyRuntimeStatus: LANProxyRuntimeStatus {
+        get {
+            guard let raw = defaults?.string(forKey: AppGroupConstants.lanProxyStatusKey),
+                  let value = LANProxyRuntimeStatus(rawValue: raw) else {
+                return .stopped
+            }
+            return value
+        }
+        set { defaults?.set(newValue.rawValue, forKey: AppGroupConstants.lanProxyStatusKey) }
+    }
+
+    var lanProxyBoundHost: String? {
+        get { defaults?.string(forKey: AppGroupConstants.lanProxyBoundHostKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: AppGroupConstants.lanProxyBoundHostKey)
+            } else {
+                defaults?.removeObject(forKey: AppGroupConstants.lanProxyBoundHostKey)
+            }
+        }
+    }
+
+    var lanProxyActiveHttpPort: Int {
+        get { defaults?.integer(forKey: AppGroupConstants.lanProxyActiveHttpPortKey) ?? 0 }
+        set { defaults?.set(newValue, forKey: AppGroupConstants.lanProxyActiveHttpPortKey) }
+    }
+
+    var lanProxyActiveSocksPort: Int {
+        get { defaults?.integer(forKey: AppGroupConstants.lanProxyActiveSocksPortKey) ?? 0 }
+        set { defaults?.set(newValue, forKey: AppGroupConstants.lanProxyActiveSocksPortKey) }
+    }
+
+    var lanProxyStatusDetail: String? {
+        get { defaults?.string(forKey: AppGroupConstants.lanProxyStatusDetailKey) }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: AppGroupConstants.lanProxyStatusDetailKey)
+            } else {
+                defaults?.removeObject(forKey: AppGroupConstants.lanProxyStatusDetailKey)
+            }
+        }
+    }
+
     func installPsiphonConfig(json: String, serverEntries: String?, bundled: Bool = true) throws {
         let hasEntries = !(serverEntries ?? "").isEmpty
         let normalized = try PsiphonConfigValidator.normalizedJSON(

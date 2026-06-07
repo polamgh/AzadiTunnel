@@ -6,6 +6,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var statsTimer: Task<Void, Never>?
     private var connectivityTask: Task<Void, Never>?
     private let psiphonDataDirName = "psiphon-data"
+    private let lanProxy = LANProxyBridge()
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         SharedLogger.shared.log(.extensionBoot)
@@ -174,6 +175,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 SharedSettingsStore.shared.vpnStatus = .connected
                 SharedLogger.shared.log(.tunnelConnected)
+
+                let appSettings = SharedSettingsStore.shared.appSettings
+                if appSettings.shareProxyOnLocalNetworkEnabled {
+                    SharedLogger.shared.log(.lanProxyVpnReconnected)
+                    await self.startLANProxy(using: endpoints)
+                }
+
                 completionHandler(nil)
             } catch {
                 SharedLogger.shared.log(.psiphonConnectFailed, detail: "reason=\(error.localizedDescription)")
@@ -186,6 +194,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
     override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         SharedLogger.shared.log(.extensionStopEntered, detail: "reason=\(reason.rawValue)")
+        stopLANProxy(reason: .vpnDisconnected)
         stopPacketForwarding()
         TunnelStatisticsStore.markDisconnected()
         SharedSettingsStore.shared.vpnStatus = .disconnected
@@ -253,6 +262,94 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let dir = container.appendingPathComponent(psiphonDataDirName, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    // MARK: - LAN proxy bridge
+
+    /// Sent from the main app via `NETunnelProviderSession.sendProviderMessage`.
+    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
+        guard let cmd = String(data: messageData, encoding: .utf8) else {
+            completionHandler?(nil)
+            return
+        }
+        switch cmd {
+        case "lan-proxy:start", "lan-proxy:restart":
+            Task { [weak self] in
+                guard let self else { completionHandler?(nil); return }
+                if let endpoints = self.engine?.localProxyEndpoints, endpoints.hasSocks {
+                    await self.startLANProxy(using: endpoints)
+                } else {
+                    SharedSettingsStore.shared.lanProxyRuntimeStatus = .vpnDisconnected
+                }
+                completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
+            }
+        case "lan-proxy:stop":
+            stopLANProxy(reason: .userToggle)
+            completionHandler?(LANProxyRuntimeStatus.stopped.rawValue.data(using: .utf8))
+        case "lan-proxy:status":
+            completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
+        default:
+            completionHandler?(nil)
+        }
+    }
+
+    private enum LANProxyStopReason {
+        case vpnDisconnected
+        case userToggle
+    }
+
+    private func startLANProxy(using endpoints: PsiphonLocalProxyEndpoints) async {
+        let settings = SharedSettingsStore.shared.appSettings
+        guard settings.shareProxyOnLocalNetworkEnabled else { return }
+
+        guard endpoints.hasSocks else {
+            SharedSettingsStore.shared.lanProxyRuntimeStatus = .vpnDisconnected
+            return
+        }
+
+        // Prefer Wi-Fi address (en0); fall back to 0.0.0.0 so binding still succeeds when
+        // the device is on Wi-Fi via shared connection / personal hotspot client.
+        let bindHost: String
+        if let wifi = LocalNetworkAddress.wifiIPv4() {
+            SharedLogger.shared.log(.lanProxyWifiDetected, detail: "ip=\(wifi)")
+            bindHost = wifi
+        } else {
+            SharedLogger.shared.log(.lanProxyWifiMissing)
+            SharedSettingsStore.shared.lanProxyRuntimeStatus = .noWifiIP
+            return
+        }
+
+        SharedLogger.shared.log(.lanProxyEnabled, detail: "http=\(settings.lanHttpProxyPort) socks=\(settings.lanSocksProxyPort)")
+
+        let configuration = LANProxyBridge.Configuration(
+            bindHost: bindHost,
+            httpPort: settings.lanHttpProxyPort,
+            socksPort: settings.lanSocksProxyPort,
+            upstream: LANProxyBridge.Endpoints(
+                psiphonHost: endpoints.host,
+                psiphonHttpPort: endpoints.httpPort,
+                psiphonSocksPort: endpoints.socksPort
+            )
+        )
+        _ = await lanProxy.start(configuration: configuration)
+    }
+
+    private func stopLANProxy(reason: LANProxyStopReason) {
+        let store = SharedSettingsStore.shared
+        let wasRunning = lanProxy.isRunning
+        lanProxy.stop()
+        switch reason {
+        case .vpnDisconnected:
+            if wasRunning {
+                SharedLogger.shared.log(.lanProxyVpnDisconnected)
+            }
+            store.lanProxyRuntimeStatus = .vpnDisconnected
+        case .userToggle:
+            if wasRunning {
+                SharedLogger.shared.log(.lanProxyDisabled)
+            }
+            store.lanProxyRuntimeStatus = .stopped
+        }
     }
 
     private static func makeNetworkSettings(

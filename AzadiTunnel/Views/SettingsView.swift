@@ -23,6 +23,7 @@ struct SettingsView: View {
                     cdnFrontingSection
                 }
                 proxySection
+                shareProxySection
                 behaviorSection
                 advancedSection
                 logsSection
@@ -211,6 +212,22 @@ struct SettingsView: View {
                 SecureField("Username (optional)", text: $settings.upstreamProxyUsername)
                 SecureField("Password (optional)", text: $settings.upstreamProxyPassword)
             }
+        }
+    }
+
+    private var shareProxySection: some View {
+        Section {
+            NavigationLink {
+                ShareProxyView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t(.shareProxyRowTitle))
+                    Text(L10n.t(.shareProxyRowSubtitle))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("shareProxyRow")
         }
     }
 

@@ -307,6 +307,34 @@ final class VPNController: ObservableObject {
         return ready
     }
 
+    /// Sends a string command to the running packet-tunnel extension. Returns the response
+    /// payload if the extension is up and answered, or `nil` if the VPN is not active.
+    @discardableResult
+    func sendProviderMessage(_ command: String) async -> String? {
+        if manager == nil {
+            await refreshStatusFromSystem()
+        }
+        guard let session = manager?.connection as? NETunnelProviderSession else { return nil }
+        guard let data = command.data(using: .utf8) else { return nil }
+        return await withCheckedContinuation { (cont: CheckedContinuation<String?, Never>) in
+            do {
+                try session.sendProviderMessage(data) { response in
+                    if let response, let text = String(data: response, encoding: .utf8) {
+                        cont.resume(returning: text)
+                    } else {
+                        cont.resume(returning: nil)
+                    }
+                }
+            } catch {
+                SharedLogger.shared.logRaw(
+                    "VPN_PROVIDER_MSG_FAILED",
+                    detail: "cmd=\(command) err=\(error.localizedDescription)"
+                )
+                cont.resume(returning: nil)
+            }
+        }
+    }
+
     private func observeConnection(_ mgr: NETunnelProviderManager) {
         NotificationCenter.default.addObserver(
             forName: .NEVPNStatusDidChange,

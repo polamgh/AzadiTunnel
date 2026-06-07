@@ -32,3 +32,6 @@ Tooling/psiphon/build/shiro-apk/
 
 # Local device/CI test output (may contain diagnostics)
 Tooling/test-logs/
+
+# Xcode build artifacts
+build/

@@ -175,7 +175,91 @@ enum AppLocalizationUI {
         .privacyNoticeBody: "AzadiTunnel is designed to minimize data collection. The app stores your tunnel settings locally on your device. Debug logs may include connection status, selected transport, protocol names, public IP test results, DNS test results, and device/app version information. Debug reports remove secrets before export.",
         .privacyNoticeNoSecrets: "We do not intentionally log private keys, server entry signature keys, obfuscation keys, user tokens, or full raw configs containing secrets.",
         .privacyNoticeReviewExport: "If you export a debug report, review it before sharing.",
-        .privacyNoticeStoreKit: "Support purchases, if available, are handled by Apple through StoreKit."
+        .privacyNoticeStoreKit: "Support purchases, if available, are handled by Apple through StoreKit.",
+        .shareProxyRowTitle: "Share Proxy on Local Network",
+        .shareProxyRowSubtitle: "Use this iPhone as a proxy gateway for devices on the same Wi-Fi.",
+        .shareProxyNavTitle: "Share Proxy on Local Network",
+        .shareProxyEnableTitle: "Enable Local Network Proxy Sharing",
+        .shareProxyEnableDescription: "Allow devices on the same Wi-Fi network to use this iPhone as a proxy while AzadiTunnel is connected.",
+        .shareProxyTrustedNetworkWarning: "Only enable this on trusted Wi-Fi networks. Other devices on the same network may be able to connect to your proxy.",
+        .shareProxyStatusSection: "Status",
+        .shareProxyStatusRunning: "Running",
+        .shareProxyStatusStopped: "Stopped",
+        .shareProxyStatusVpnDisconnected: "VPN disconnected",
+        .shareProxyStatusNoWifi: "No Wi-Fi IP found",
+        .shareProxyStatusPortInUse: "Port already in use",
+        .shareProxyStatusFailed: "Failed to start",
+        .shareProxyWifiIP: "Wi-Fi IP",
+        .shareProxyNoWifiIP: "—",
+        .shareProxyNoWifiHint: "No Wi-Fi IP found. Connect to Wi-Fi first.",
+        .shareProxyAddressSection: "Proxy addresses",
+        .shareProxyHttpAddressTitle: "HTTP Proxy",
+        .shareProxySocksAddressTitle: "SOCKS5 Proxy",
+        .shareProxyAddressUnavailable: "Unavailable",
+        .shareProxyPortsSection: "Port settings",
+        .shareProxyHttpPort: "HTTP Port",
+        .shareProxySocksPort: "SOCKS5 Port",
+        .shareProxySavePorts: "Save Ports",
+        .shareProxyPortsSaved: "Ports saved",
+        .shareProxyPortOutOfRange: "Port must be between 1024 and 65535.",
+        .shareProxyPortsMustDiffer: "HTTP and SOCKS5 ports cannot be the same.",
+        .shareProxyPortHint: "Defaults: HTTP 8087, SOCKS5 1088.",
+        .shareProxyAuthSection: "Authentication",
+        .shareProxyAuthToggle: "Enable authentication",
+        .shareProxyUsername: "Username",
+        .shareProxyPassword: "Password",
+        .shareProxyNoAuthWarning: "No password protection is currently enabled. Anyone on the same Wi-Fi network may be able to use this proxy while it is running.",
+        .shareProxySecuritySection: "Security",
+        .shareProxySecurityWarning: "Security warning: This feature exposes a proxy server to your local Wi-Fi network. Only use it on trusted networks such as your home Wi-Fi. Do not enable it on public Wi-Fi.",
+        .shareProxyInstructionsSection: "How to connect another device",
+        .shareProxyHowToiPhone: "iPhone / iPad",
+        .shareProxyHowToAndroid: "Android",
+        .shareProxyHowToWindows: "Windows",
+        .shareProxyHowToAndroidTV: "Android TV",
+        .shareProxyInstructionsiPhone: """
+1. Connect the other iPhone/iPad to the same Wi-Fi.
+2. Open Settings.
+3. Tap Wi-Fi.
+4. Tap the info button next to your Wi-Fi network.
+5. Scroll to HTTP Proxy.
+6. Select Manual.
+7. Server: enter this iPhone's Wi-Fi IP.
+8. Port: enter 8087 or your custom HTTP port.
+9. Save and open Safari to test.
+""",
+        .shareProxyInstructionsAndroid: """
+1. Connect the Android phone to the same Wi-Fi.
+2. Open Wi-Fi settings.
+3. Tap your connected Wi-Fi network.
+4. Open Advanced settings or Proxy settings.
+5. Set Proxy to Manual.
+6. Proxy hostname: enter this iPhone's Wi-Fi IP.
+7. Proxy port: enter 8087 or your custom HTTP port.
+8. Save and test in browser.
+""",
+        .shareProxyInstructionsWindows: """
+1. Connect Windows to the same Wi-Fi.
+2. Open Settings.
+3. Go to Network & Internet.
+4. Open Proxy.
+5. Turn on Manual proxy setup.
+6. Address: enter this iPhone's Wi-Fi IP.
+7. Port: enter 8087 or your custom HTTP port.
+8. Save and test in browser.
+""",
+        .shareProxyInstructionsAndroidTV: """
+1. Connect Android TV to the same Wi-Fi.
+2. Open Settings.
+3. Go to Network & Internet.
+4. Select your Wi-Fi network.
+5. Open Proxy settings if available.
+6. Choose Manual.
+7. Proxy hostname: enter this iPhone's Wi-Fi IP.
+8. Proxy port: enter 8087 or your custom HTTP port.
+9. Save and test with an app/browser.
+""",
+        .shareProxySocksNoteTitle: "SOCKS5 note",
+        .shareProxySocksNoteBody: "Some devices do not support SOCKS5 in system Wi-Fi settings. For SOCKS5, use an app/browser/player that supports SOCKS5 manually and enter the iPhone's Wi-Fi IP as the host and 1088 (or your custom SOCKS5 port) as the port."
     ]
 
     private static let fa: [AppLanguageController.L10nKey: String] = [
@@ -348,6 +432,90 @@ enum AppLocalizationUI {
         .privacyNoticeBody: "AzadiTunnel برای کمینه کردن جمع‌آوری داده طراحی شده است. تنظیمات تونل روی دستگاه شما ذخیره می‌شود. گزارش اشکال‌زدایی ممکن است وضعیت اتصال، حمل‌ونقل، پروتکل، IP عمومی، DNS و نسخهٔ اپ/دستگاه را شامل شود. گزارش‌ها قبل از صادرات پاک‌سازی می‌شوند.",
         .privacyNoticeNoSecrets: "عمداً کلیدهای خصوصی، کلیدهای امضای server entry، کلید obfuscation، توکن کاربر یا پیکربندی خام کامل حاوی راز را ثبت نمی‌کنیم.",
         .privacyNoticeReviewExport: "قبل از اشتراک‌گذاری گزارش اشکال‌زدایی، آن را بازبینی کنید.",
-        .privacyNoticeStoreKit: "خریدهای پشتیبانی، در صورت وجود، از طریق StoreKit اپل انجام می‌شود."
+        .privacyNoticeStoreKit: "خریدهای پشتیبانی، در صورت وجود، از طریق StoreKit اپل انجام می‌شود.",
+        .shareProxyRowTitle: "اشتراک پروکسی روی شبکه محلی",
+        .shareProxyRowSubtitle: "از این آیفون به‌عنوان دروازهٔ پروکسی برای دستگاه‌های هم‌شبکه استفاده کنید.",
+        .shareProxyNavTitle: "اشتراک پروکسی روی شبکه محلی",
+        .shareProxyEnableTitle: "فعال‌سازی اشتراک پروکسی در شبکه محلی",
+        .shareProxyEnableDescription: "اجازه می‌دهد دستگاه‌های هم‌شبکه از این آیفون به‌عنوان پروکسی استفاده کنند، در حالی که AzadiTunnel متصل است.",
+        .shareProxyTrustedNetworkWarning: "فقط روی شبکه‌های Wi-Fi مورد اعتماد فعال کنید. دستگاه‌های دیگر روی همان شبکه ممکن است بتوانند به پروکسی شما وصل شوند.",
+        .shareProxyStatusSection: "وضعیت",
+        .shareProxyStatusRunning: "در حال اجرا",
+        .shareProxyStatusStopped: "متوقف",
+        .shareProxyStatusVpnDisconnected: "VPN قطع است",
+        .shareProxyStatusNoWifi: "آدرس Wi-Fi پیدا نشد",
+        .shareProxyStatusPortInUse: "پورت قبلاً استفاده شده",
+        .shareProxyStatusFailed: "اجرا ناموفق بود",
+        .shareProxyWifiIP: "آدرس IP وای‌فای",
+        .shareProxyNoWifiIP: "—",
+        .shareProxyNoWifiHint: "آدرس Wi-Fi پیدا نشد. ابتدا به Wi-Fi وصل شوید.",
+        .shareProxyAddressSection: "آدرس‌های پروکسی",
+        .shareProxyHttpAddressTitle: "پروکسی HTTP",
+        .shareProxySocksAddressTitle: "پروکسی SOCKS5",
+        .shareProxyAddressUnavailable: "در دسترس نیست",
+        .shareProxyPortsSection: "تنظیمات پورت",
+        .shareProxyHttpPort: "پورت HTTP",
+        .shareProxySocksPort: "پورت SOCKS5",
+        .shareProxySavePorts: "ذخیره پورت‌ها",
+        .shareProxyPortsSaved: "پورت‌ها ذخیره شد",
+        .shareProxyPortOutOfRange: "پورت باید بین ۱۰۲۴ تا ۶۵۵۳۵ باشد.",
+        .shareProxyPortsMustDiffer: "پورت HTTP و SOCKS5 نمی‌توانند یکسان باشند.",
+        .shareProxyPortHint: "پیش‌فرض: HTTP ۸۰۸۷، SOCKS5 ۱۰۸۸.",
+        .shareProxyAuthSection: "احراز هویت",
+        .shareProxyAuthToggle: "فعال‌سازی احراز هویت",
+        .shareProxyUsername: "نام کاربری",
+        .shareProxyPassword: "گذرواژه",
+        .shareProxyNoAuthWarning: "در حال حاضر محافظت با گذرواژه فعال نیست. هر کسی روی همان Wi-Fi ممکن است بتواند از این پروکسی استفاده کند.",
+        .shareProxySecuritySection: "امنیت",
+        .shareProxySecurityWarning: "هشدار امنیتی: این قابلیت یک سرور پروکسی را روی شبکهٔ Wi-Fi محلی شما در دسترس قرار می‌دهد. فقط روی شبکه‌های مورد اعتماد مانند Wi-Fi خانه استفاده کنید. روی Wi-Fi عمومی فعال نکنید.",
+        .shareProxyInstructionsSection: "راهنمای اتصال دستگاه دیگر",
+        .shareProxyHowToiPhone: "آیفون / آیپد",
+        .shareProxyHowToAndroid: "اندروید",
+        .shareProxyHowToWindows: "ویندوز",
+        .shareProxyHowToAndroidTV: "اندروید TV",
+        .shareProxyInstructionsiPhone: """
+۱. آیفون/آیپد دیگر را به همان Wi-Fi وصل کنید.
+۲. Settings (تنظیمات) را باز کنید.
+۳. روی Wi-Fi بزنید.
+۴. روی دکمهٔ info کنار نام شبکهٔ Wi-Fi بزنید.
+۵. تا HTTP Proxy پایین بروید.
+۶. Manual را انتخاب کنید.
+۷. در Server آدرس Wi-Fi این آیفون را وارد کنید.
+۸. در Port مقدار ۸۰۸۷ یا پورت HTTP سفارشی‌تان را وارد کنید.
+۹. ذخیره و سپس Safari را برای آزمایش باز کنید.
+""",
+        .shareProxyInstructionsAndroid: """
+۱. گوشی اندروید را به همان Wi-Fi وصل کنید.
+۲. تنظیمات Wi-Fi را باز کنید.
+۳. روی نام شبکهٔ متصل‌شده بزنید.
+۴. Advanced یا Proxy settings را باز کنید.
+۵. Proxy را روی Manual بگذارید.
+۶. در Proxy hostname آدرس Wi-Fi این آیفون را وارد کنید.
+۷. در Proxy port مقدار ۸۰۸۷ یا پورت HTTP سفارشی‌تان را وارد کنید.
+۸. ذخیره کنید و در مرورگر آزمایش کنید.
+""",
+        .shareProxyInstructionsWindows: """
+۱. ویندوز را به همان Wi-Fi وصل کنید.
+۲. Settings را باز کنید.
+۳. به Network & Internet بروید.
+۴. بخش Proxy را باز کنید.
+۵. Manual proxy setup را روشن کنید.
+۶. در Address آدرس Wi-Fi این آیفون را وارد کنید.
+۷. در Port مقدار ۸۰۸۷ یا پورت HTTP سفارشی‌تان را وارد کنید.
+۸. ذخیره کنید و در مرورگر آزمایش کنید.
+""",
+        .shareProxyInstructionsAndroidTV: """
+۱. اندروید TV را به همان Wi-Fi وصل کنید.
+۲. Settings را باز کنید.
+۳. به Network & Internet بروید.
+۴. شبکهٔ Wi-Fi خود را انتخاب کنید.
+۵. در صورت وجود، Proxy settings را باز کنید.
+۶. Manual را انتخاب کنید.
+۷. در Proxy hostname آدرس Wi-Fi این آیفون را وارد کنید.
+۸. در Proxy port مقدار ۸۰۸۷ یا پورت HTTP سفارشی‌تان را وارد کنید.
+۹. ذخیره کنید و با یک اپ/مرورگر آزمایش کنید.
+""",
+        .shareProxySocksNoteTitle: "نکتهٔ SOCKS5",
+        .shareProxySocksNoteBody: "بعضی دستگاه‌ها در تنظیمات Wi-Fi سیستم از SOCKS5 پشتیبانی نمی‌کنند. برای SOCKS5 از یک اپ/مرورگر/پخش‌کننده که SOCKS5 را پشتیبانی می‌کند استفاده کنید و آدرس Wi-Fi این آیفون را به‌عنوان Host و ۱۰۸۸ (یا پورت SOCKS5 سفارشی) را به‌عنوان Port وارد کنید."
     ]
 }

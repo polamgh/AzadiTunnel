@@ -16,6 +16,13 @@ enum AppGroupConstants {
     static let testModeKey = "ui_test_mode"
     static let lastInternetTestOKKey = "last_internet_test_ok"
     static let psiphonTunnelEstablishedKey = "psiphon_tunnel_established"
+
+    /// Persisted runtime state for the LAN proxy bridge (written by extension, read by UI).
+    static let lanProxyStatusKey = "lan_proxy_status"
+    static let lanProxyBoundHostKey = "lan_proxy_bound_host"
+    static let lanProxyActiveHttpPortKey = "lan_proxy_active_http_port"
+    static let lanProxyActiveSocksPortKey = "lan_proxy_active_socks_port"
+    static let lanProxyStatusDetailKey = "lan_proxy_status_detail"
 }
 
 enum SharedLogEvent: String, CaseIterable {
@@ -69,6 +76,37 @@ enum SharedLogEvent: String, CaseIterable {
     case dnsForwardOk = "DNS_FORWARD_OK"
     case dnsForwardFailed = "DNS_FORWARD_FAILED"
     case tcpRelayOk = "TCP_RELAY_OK"
+    case lanProxySettingOpened = "LAN_PROXY_SETTING_OPENED"
+    case lanProxyEnabled = "LAN_PROXY_ENABLED"
+    case lanProxyDisabled = "LAN_PROXY_DISABLED"
+    case lanProxyWifiDetected = "LAN_PROXY_WIFI_IP_DETECTED"
+    case lanProxyWifiMissing = "LAN_PROXY_WIFI_IP_MISSING"
+    case lanProxyHttpListening = "LAN_PROXY_HTTP_LISTENING"
+    case lanProxySocksListening = "LAN_PROXY_SOCKS_LISTENING"
+    case lanProxyHttpStopped = "LAN_PROXY_HTTP_STOPPED"
+    case lanProxySocksStopped = "LAN_PROXY_SOCKS_STOPPED"
+    case lanProxyHttpBindFailed = "LAN_PROXY_HTTP_BIND_FAILED"
+    case lanProxySocksBindFailed = "LAN_PROXY_SOCKS_BIND_FAILED"
+    case lanProxyPortInUse = "LAN_PROXY_PORT_IN_USE"
+    case lanProxyVpnDisconnected = "LAN_PROXY_VPN_DISCONNECTED_STOP"
+    case lanProxyVpnReconnected = "LAN_PROXY_VPN_RECONNECTED_RESTART"
+    case lanProxyAuthEnabled = "LAN_PROXY_AUTH_ENABLED"
+    case lanProxyAuthDisabled = "LAN_PROXY_AUTH_DISABLED"
+    case lanProxyPortsChanged = "LAN_PROXY_PORTS_CHANGED"
+    case lanProxyAcceptError = "LAN_PROXY_ACCEPT_ERROR"
+    case lanProxyForwardError = "LAN_PROXY_FORWARD_ERROR"
+    case lanProxyHttpClientConnected = "LAN_PROXY_HTTP_CLIENT_CONNECTED"
+    case lanProxyHttpRequestLine = "LAN_PROXY_HTTP_REQUEST_LINE"
+    case lanProxyHttpConnectHost = "LAN_PROXY_HTTP_CONNECT_HOST"
+    case lanProxyHttpConnectEstablished = "LAN_PROXY_HTTP_CONNECT_ESTABLISHED"
+    case lanProxyHttpConnectFailed = "LAN_PROXY_HTTP_CONNECT_FAILED"
+    case lanProxySocksClientConnected = "LAN_PROXY_SOCKS_CLIENT_CONNECTED"
+    case lanProxySocksGreetingReceived = "LAN_PROXY_SOCKS_GREETING_RECEIVED"
+    case lanProxySocksConnectHost = "LAN_PROXY_SOCKS_CONNECT_HOST"
+    case lanProxySocksConnectEstablished = "LAN_PROXY_SOCKS_CONNECT_ESTABLISHED"
+    case lanProxyRelayStarted = "LAN_PROXY_RELAY_STARTED"
+    case lanProxyRelayClosed = "LAN_PROXY_RELAY_CLOSED"
+    case lanProxyRelayError = "LAN_PROXY_RELAY_ERROR"
 }
 
 enum VPNStatusDisplay: String, Codable {
@@ -77,4 +115,14 @@ enum VPNStatusDisplay: String, Codable {
     case connected
     case disconnecting
     case error
+}
+
+/// Runtime state of the LAN proxy bridge published by the extension for UI consumption.
+enum LANProxyRuntimeStatus: String, Codable {
+    case stopped
+    case running
+    case vpnDisconnected = "vpn_disconnected"
+    case noWifiIP = "no_wifi_ip"
+    case portInUse = "port_in_use"
+    case failedToStart = "failed_to_start"
 }

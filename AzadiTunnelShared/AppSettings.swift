@@ -44,6 +44,17 @@ struct AppSettings: Codable, Equatable {
     /// First-launch language picker completed (English or Persian chosen explicitly).
     var hasChosenLanguage: Bool = false
 
+    /// Share this iPhone's tunneled proxy with other devices on the same Wi-Fi.
+    var shareProxyOnLocalNetworkEnabled: Bool = false
+    /// LAN HTTP proxy listener port (1024…65535).
+    var lanHttpProxyPort: Int = 8087
+    /// LAN SOCKS5 proxy listener port (1024…65535).
+    var lanSocksProxyPort: Int = 1088
+    /// Reserved for future username/password challenge on LAN proxy.
+    var lanProxyAuthEnabled: Bool = false
+    var lanProxyUsername: String = ""
+    var lanProxyPassword: String = ""
+
     enum ConduitMode: String, Codable, CaseIterable, Identifiable {
         case auto
         case shiroCommunity = "shirokhorshid"

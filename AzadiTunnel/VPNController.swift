@@ -114,7 +114,21 @@ final class VPNController: ObservableObject {
             return
         }
 
+        // Ensure the Iran-bypass cache is populated before the extension reads it at startTunnel.
+        // Both steps are throttled, so this is usually instant after the first connect.
+        await ensureBypassCacheReady()
         await startTunnel()
+    }
+
+    /// Refresh the Iran CIDR list + resolve bypass domains into App Group cache (no-op if disabled).
+    private func ensureBypassCacheReady() async {
+        let settings = SharedSettingsStore.shared.appSettings
+        guard settings.bypassIranIPsEnabled else { return }
+        _ = await IranBypassListService.refresh(force: false)
+        let domains = BypassRoutes.tokenize(settings.bypassDomains)
+        if !domains.isEmpty {
+            _ = await BypassDomainResolver.resolveAndCache(domains: domains)
+        }
     }
 
     func cancelProxyOnlyNoWiFiConnect() {

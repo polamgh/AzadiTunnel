@@ -23,6 +23,16 @@ enum AppGroupConstants {
     static let lanProxyActiveHttpPortKey = "lan_proxy_active_http_port"
     static let lanProxyActiveSocksPortKey = "lan_proxy_active_socks_port"
     static let lanProxyStatusDetailKey = "lan_proxy_status_detail"
+
+    /// Iran-bypass: cached CIDR list (file, one entry per line) + metadata.
+    static let bypassIranCidrFileName = "bypass-iran-cidr.txt"
+    static let bypassIranListUpdatedKey = "bypass_iran_list_updated_at"
+    static let bypassIranListCountKey = "bypass_iran_list_count"
+    /// Cached domain → resolved IPv4 list (JSON file) for domain-based bypass.
+    static let bypassDomainIPsFileName = "bypass-domain-ips.json"
+    static let bypassDomainsUpdatedKey = "bypass_domains_updated_at"
+    /// Route count the extension actually applied to `excludedRoutes` (published for UI).
+    static let bypassRoutesAppliedCountKey = "bypass_routes_applied_count"
 }
 
 enum SharedLogEvent: String, CaseIterable {
@@ -125,6 +135,18 @@ enum SharedLogEvent: String, CaseIterable {
     case proxyOnlyDisableOffered = "PROXY_ONLY_DISABLE_OFFERED"
     case proxyOnlyDisabledByUser = "PROXY_ONLY_DISABLED_BY_USER"
     case proxyOnlyStartCancelledNoWifi = "PROXY_ONLY_START_CANCELLED_NO_WIFI"
+    case bypassIranEnabled = "BYPASS_IRAN_ENABLED"
+    case bypassIranDisabled = "BYPASS_IRAN_DISABLED"
+    case bypassIranListFetchStarted = "BYPASS_IRAN_LIST_FETCH_STARTED"
+    case bypassIranListFetchOk = "BYPASS_IRAN_LIST_FETCH_OK"
+    case bypassIranListFetchFailed = "BYPASS_IRAN_LIST_FETCH_FAILED"
+    case bypassIranListCacheUsed = "BYPASS_IRAN_LIST_CACHE_USED"
+    case bypassIranNoListWarning = "BYPASS_IRAN_NO_LIST_WARNING"
+    case bypassIranRoutesApplied = "BYPASS_IRAN_ROUTES_APPLIED"
+    case bypassCustomRouteAdded = "BYPASS_CUSTOM_ROUTE_ADDED"
+    case bypassDomainResolved = "BYPASS_DOMAIN_RESOLVED"
+    case bypassDomainFailed = "BYPASS_DOMAIN_FAILED"
+    case bypassProxyDisabledForRoutes = "BYPASS_PROXY_DISABLED_FOR_ROUTES"
 }
 
 enum VPNStatusDisplay: String, Codable {

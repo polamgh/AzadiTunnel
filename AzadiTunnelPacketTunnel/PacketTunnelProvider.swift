@@ -473,6 +473,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
+
+        // Iran / custom / domain bypass: matching destination IPs leave through the device's normal
+        // interface instead of the tunnel. iOS honors excludedRoutes at the IP layer.
+        let bypassEnabled = SharedSettingsStore.shared.appSettings.bypassIranIPsEnabled
+        let excluded = bypassEnabled ? Self.buildBypassExcludedRoutes() : []
+        if !excluded.isEmpty {
+            ipv4.excludedRoutes = excluded
+        }
         settings.ipv4Settings = ipv4
         settings.mtu = NSNumber(value: 1500)
 
@@ -481,8 +489,21 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         dns.matchDomains = [""]
         settings.dnsSettings = dns
 
-        // iOS routes Safari/NSURLSession HTTP(S) through the local Psiphon HTTP proxy (bypasses tun2socks).
-        if endpoints.hasHttp {
+        // System HTTP proxy (matchDomains=[""]) makes iOS send ALL HTTP/HTTPS to the Psiphon loopback
+        // proxy. In this architecture that proxy also carries general internet / public-IP checks, so
+        // dropping it broke connectivity even though IP routes were applied.
+        //
+        // Default behavior now: ALWAYS keep the normal system proxy, exactly like bypass=false.
+        // excludedRoutes are applied best-effort — they bypass the VPN for traffic that rides
+        // tun2socks (raw sockets / non-proxy apps), while apps that honor the system HTTP proxy still
+        // go through the tunnel. The UI documents this.
+        //
+        // The proxy is dropped ONLY when the user opts into the experimental "Strict IP bypass mode",
+        // and only when there is at least one route to honor. This is the sole case that emits
+        // BYPASS_PROXY_DISABLED_FOR_ROUTES.
+        let strictMode = SharedSettingsStore.shared.appSettings.bypassStrictModeEnabled
+        let disableProxyForBypass = bypassEnabled && strictMode && !excluded.isEmpty
+        if endpoints.hasHttp && !disableProxyForBypass {
             let proxy = NEProxySettings()
             proxy.httpEnabled = true
             proxy.httpsEnabled = true
@@ -494,11 +515,68 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             settings.proxySettings = proxy
             SharedLogger.shared.logRaw(
                 "TUNNEL_HTTP_PROXY",
-                detail: "enabled host=\(endpoints.host) port=\(endpoints.httpPort)"
+                detail: "enabled host=\(endpoints.host) port=\(endpoints.httpPort) bypass=\(bypassEnabled) routes=\(excluded.count)"
+            )
+            if bypassEnabled && excluded.isEmpty {
+                SharedLogger.shared.log(
+                    .bypassIranNoListWarning,
+                    detail: "reason=zero_routes action=keep_system_proxy_normal_vpn"
+                )
+            }
+        } else if disableProxyForBypass {
+            SharedLogger.shared.log(
+                .bypassProxyDisabledForRoutes,
+                detail: "reason=strict_mode_enabled routes=\(excluded.count)"
             )
         }
 
         return settings
+    }
+
+    /// Collect Iran (cached) + custom + resolved-domain destinations into NE excluded routes.
+    ///
+    /// Reads everything from App Group storage so it works even if the app was killed while the
+    /// tunnel kept running. De-duplicates across all three sources and publishes the applied count.
+    private static func buildBypassExcludedRoutes() -> [NEIPv4Route] {
+        let store = SharedSettingsStore.shared
+        let settings = store.appSettings
+
+        var collected: [BypassRoute] = []
+        var seen = Set<BypassRoute>()
+        func add(_ routes: [BypassRoute]) {
+            for r in routes where seen.insert(r).inserted { collected.append(r) }
+        }
+
+        // 1) Iran CIDR list: fetched cache if present, otherwise the bundled snapshot (never empty).
+        let iranLines = store.effectiveBypassIranCidrLines
+        if iranLines.isEmpty {
+            SharedLogger.shared.log(.bypassIranNoListWarning, detail: "reason=cache_and_bundle_empty action=connect_normally")
+        } else {
+            let usingBundled = store.bypassIranListIsBundledFallback
+            SharedLogger.shared.log(.bypassIranListCacheUsed, detail: "count=\(iranLines.count) source=\(usingBundled ? "bundled" : "cache")")
+            add(BypassRoutes.parseList(iranLines))
+        }
+
+        // 2) User custom IPs / CIDRs.
+        let customRoutes = BypassRoutes.parseBlob(settings.bypassCustomRoutes)
+        for r in customRoutes {
+            SharedLogger.shared.log(.bypassCustomRouteAdded, detail: "value=\(r.cidr)")
+        }
+        add(customRoutes)
+
+        // 3) Resolved domain IPs (as /32).
+        let domainMap = store.bypassDomainResolvedIPs
+        for (_, ips) in domainMap {
+            add(BypassRoutes.parseList(ips)) // bare IPs parse to /32
+        }
+
+        let neRoutes = collected.map { NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask) }
+        store.bypassRoutesAppliedCount = neRoutes.count
+        SharedLogger.shared.log(
+            .bypassIranRoutesApplied,
+            detail: "count=\(neRoutes.count) iran=\(iranLines.count) custom=\(customRoutes.count) domains=\(domainMap.count)"
+        )
+        return neRoutes
     }
 
     /// Minimal tunnel settings for Proxy Only — extension stays alive; no routes, DNS, or system proxy.

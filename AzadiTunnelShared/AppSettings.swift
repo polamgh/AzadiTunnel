@@ -58,6 +58,18 @@ struct AppSettings: Codable, Equatable {
     var lanProxyUsername: String = ""
     var lanProxyPassword: String = ""
 
+    /// When true, Iranian IPv4 ranges (and custom/domain bypass entries) are added to the tunnel's
+    /// `excludedRoutes` so they leave through the device's normal interface instead of the VPN.
+    var bypassIranIPsEnabled: Bool = false
+    /// User-supplied IPs / CIDRs (newline or comma separated), e.g. `1.2.3.4` or `1.2.3.0/24`.
+    var bypassCustomRoutes: String = ""
+    /// User-supplied hostnames (newline or comma separated) resolved to /32 excluded routes.
+    var bypassDomains: String = ""
+    /// EXPERIMENTAL. When true, the in-tunnel system HTTP proxy is dropped while bypass routes are
+    /// active so excludedRoutes are honored for proxy-using apps too. Off by default because it can
+    /// break general internet / public-IP checks in this architecture (system proxy carries them).
+    var bypassStrictModeEnabled: Bool = false
+
     enum ConduitMode: String, Codable, CaseIterable, Identifiable {
         case auto
         case shiroCommunity = "shirokhorshid"

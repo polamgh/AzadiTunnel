@@ -182,6 +182,96 @@ final class SharedSettingsStore {
         }
     }
 
+    // MARK: - Iran bypass cache
+
+    private var bypassIranCidrFileURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupConstants.suiteName)?
+            .appendingPathComponent(AppGroupConstants.bypassIranCidrFileName)
+    }
+
+    private var bypassDomainIPsFileURL: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupConstants.suiteName)?
+            .appendingPathComponent(AppGroupConstants.bypassDomainIPsFileName)
+    }
+
+    /// Cached Iran CIDR lines (too large for UserDefaults — stored as an App Group file).
+    var bypassIranCidrLines: [String] {
+        guard let url = bypassIranCidrFileURL,
+              let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return []
+        }
+        return text
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") }
+    }
+
+    /// Persists a freshly fetched Iran CIDR list and records the update timestamp + count.
+    func storeBypassIranCidrLines(_ lines: [String]) {
+        guard let url = bypassIranCidrFileURL else { return }
+        let body = lines.joined(separator: "\n")
+        try? body.write(to: url, atomically: true, encoding: .utf8)
+        defaults?.set(lines.count, forKey: AppGroupConstants.bypassIranListCountKey)
+        defaults?.set(Date().timeIntervalSince1970, forKey: AppGroupConstants.bypassIranListUpdatedKey)
+    }
+
+    var bypassIranListCount: Int {
+        defaults?.integer(forKey: AppGroupConstants.bypassIranListCountKey) ?? 0
+    }
+
+    /// CIDR lines actually used for routing: the fetched cache if present, otherwise the bundled
+    /// floor. Guarantees the feature is never empty just because the remote update failed.
+    var effectiveBypassIranCidrLines: [String] {
+        let cached = bypassIranCidrLines
+        return cached.isEmpty ? BundledIranCIDR.lines : cached
+    }
+
+    /// True when no remote/cached list exists and we are falling back to the bundled snapshot.
+    var bypassIranListIsBundledFallback: Bool {
+        bypassIranCidrLines.isEmpty
+    }
+
+    /// Count shown in the UI: cache count if fetched, otherwise the bundled count.
+    var effectiveBypassIranListCount: Int {
+        let cached = bypassIranListCount
+        return cached > 0 ? cached : BundledIranCIDR.count
+    }
+
+    var bypassIranListUpdatedAt: Date? {
+        guard let ts = defaults?.object(forKey: AppGroupConstants.bypassIranListUpdatedKey) as? Double,
+              ts > 0 else { return nil }
+        return Date(timeIntervalSince1970: ts)
+    }
+
+    /// Cached domain → resolved IPv4 addresses for domain-based bypass.
+    var bypassDomainResolvedIPs: [String: [String]] {
+        guard let url = bypassDomainIPsFileURL,
+              let data = try? Data(contentsOf: url),
+              let map = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+            return [:]
+        }
+        return map
+    }
+
+    func storeBypassDomainResolvedIPs(_ map: [String: [String]]) {
+        guard let url = bypassDomainIPsFileURL,
+              let data = try? JSONEncoder().encode(map) else { return }
+        try? data.write(to: url, options: .atomic)
+        defaults?.set(Date().timeIntervalSince1970, forKey: AppGroupConstants.bypassDomainsUpdatedKey)
+    }
+
+    var bypassDomainsUpdatedAt: Date? {
+        guard let ts = defaults?.object(forKey: AppGroupConstants.bypassDomainsUpdatedKey) as? Double,
+              ts > 0 else { return nil }
+        return Date(timeIntervalSince1970: ts)
+    }
+
+    /// Number of routes the extension applied to `excludedRoutes` on the last connect.
+    var bypassRoutesAppliedCount: Int {
+        get { defaults?.integer(forKey: AppGroupConstants.bypassRoutesAppliedCountKey) ?? 0 }
+        set { defaults?.set(newValue, forKey: AppGroupConstants.bypassRoutesAppliedCountKey) }
+    }
+
     func installPsiphonConfig(json: String, serverEntries: String?, bundled: Bool = true) throws {
         let hasEntries = !(serverEntries ?? "").isEmpty
         let normalized = try PsiphonConfigValidator.normalizedJSON(

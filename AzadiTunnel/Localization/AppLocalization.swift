@@ -364,6 +364,39 @@ final class AppLanguageController: ObservableObject {
         case proxyOnlyRequiresWifiMessage
         case proxyOnlyTurnOffMode
         case proxyOnlyNotAvailableOnCellular
+        case bypassRowTitle
+        case bypassRowSubtitle
+        case bypassNavTitle
+        case bypassEnableTitle
+        case bypassEnableDescription
+        case bypassStatusSection
+        case bypassListCount
+        case bypassListUpdated
+        case bypassRoutesApplied
+        case bypassNever
+        case bypassUpdateListNow
+        case bypassUpdating
+        case bypassListUpdatedToast
+        case bypassListFailedToast
+        case bypassCustomSection
+        case bypassCustomPlaceholder
+        case bypassCustomHint
+        case bypassDomainSection
+        case bypassDomainPlaceholder
+        case bypassDomainHint
+        case bypassResolveNow
+        case bypassResolving
+        case bypassDomainWarning
+        case bypassSaveApply
+        case bypassSavedToast
+        case bypassEffectiveNote
+        case bypassReconnectNote
+        case bypassNoListWarning
+        case bypassListSourceBundled
+        case bypassBestEffortWarning
+        case bypassStrictSection
+        case bypassStrictToggle
+        case bypassStrictDescription
     }
 
     private static var extraEn: [L10nKey: String] = [:]

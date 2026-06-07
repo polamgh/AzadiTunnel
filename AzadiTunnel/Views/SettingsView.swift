@@ -25,6 +25,7 @@ struct SettingsView: View {
                 proxySection
                 proxyOnlySection
                 shareProxySection
+                bypassSection
                 behaviorSection
                 advancedSection
                 logsSection
@@ -272,6 +273,22 @@ struct SettingsView: View {
                 }
             }
             .accessibilityIdentifier("shareProxyRow")
+        }
+    }
+
+    private var bypassSection: some View {
+        Section {
+            NavigationLink {
+                BypassIranView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t(.bypassRowTitle))
+                    Text(L10n.t(.bypassRowSubtitle))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("bypassIranRow")
         }
     }
 

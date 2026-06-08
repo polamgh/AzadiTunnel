@@ -401,6 +401,20 @@ final class AppLanguageController: ObservableObject {
         case bypassStrictSection
         case bypassStrictToggle
         case bypassStrictDescription
+        case findBestTitle
+        case findBestSubtitle
+        case findBestButton
+        case findBestScanning
+        case findBestCancel
+        case findBestTestingPrefix
+        case findBestFailed
+        case findBestSpeed
+        case findBestSavedPrefix
+        case findBestNoneFound
+        case findBestConnectSaved
+        case findBestSavedLabelPrefix
+        case findBestClear
+        case findBestProxyOnlyHint
         case secureDnsRowTitle
         case secureDnsRowSubtitle
         case secureDnsNavTitle

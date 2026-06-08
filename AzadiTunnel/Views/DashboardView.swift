@@ -5,8 +5,10 @@ struct DashboardView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject private var lang = AppLanguageController.shared
     @ObservedObject private var vpn = VPNController.shared
+    @ObservedObject private var finder = BestConnectionFinder.shared
     @State private var configReady = SharedSettingsStore.shared.hasActivePsiphonConfig
     @State private var showDisclosure = false
+    @State private var startFindBestAfterDisclaimer = false
     @State private var durationText = "00:00:00"
     @State private var didRunConnectBootstrap = false
     @State private var diagnosticsExpanded = false
@@ -51,6 +53,7 @@ struct DashboardView: View {
                             }
                         }
                     }
+                    findBestConnectionCard
                     if showConduitProgress { conduitProgressCard }
                     locationCard
                     statsSection
@@ -85,9 +88,15 @@ struct DashboardView: View {
                     s.hasAcceptedVPNDisclosure = true
                     SharedSettingsStore.shared.updateAppSettings(s, logKey: "connection_disclaimer")
                     showDisclosure = false
-                    Task { await vpn.connect() }
+                    if startFindBestAfterDisclaimer {
+                        startFindBestAfterDisclaimer = false
+                        finder.start()
+                    } else {
+                        Task { await vpn.connect() }
+                    }
                 },
                 onCancel: {
+                    startFindBestAfterDisclaimer = false
                     showDisclosure = false
                 }
             )
@@ -151,6 +160,129 @@ struct DashboardView: View {
         .task(id: vpn.status) {
             await runPingRefreshLoop()
         }
+    }
+
+    // MARK: - Find Best Connection (additive; drives the existing connect flow)
+
+    private var proxyOnlyEnabled: Bool {
+        SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+    }
+
+    private var findBestConnectionCard: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "bolt.horizontal.circle.fill")
+                        .foregroundStyle(AppTheme.iranGreen)
+                    Text(L10n.t(.findBestTitle))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                    Spacer(minLength: 0)
+                }
+                Text(L10n.t(.findBestSubtitle))
+                    .font(.caption)
+                    .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if finder.isRunning {
+                    if !finder.progressLine.isEmpty {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                            Text(finder.progressLine)
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                        }
+                        .accessibilityIdentifier("findBestProgress")
+                    }
+                    if !finder.detailLine.isEmpty {
+                        Text(finder.detailLine)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    }
+                    Button(role: .destructive) {
+                        finder.cancel()
+                    } label: {
+                        Text(L10n.t(.findBestCancel))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.iranRed)
+                    .accessibilityIdentifier("findBestCancelButton")
+                } else {
+                    if proxyOnlyEnabled {
+                        Text(L10n.t(.findBestProxyOnlyHint))
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                    Button {
+                        startFindBest()
+                    } label: {
+                        Label(L10n.t(.findBestButton), systemImage: "bolt.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.iranGreen)
+                    .disabled(!configReady || proxyOnlyEnabled)
+                    .accessibilityIdentifier("findBestButton")
+
+                    if !finder.detailLine.isEmpty {
+                        Text(finder.detailLine)
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    }
+                }
+
+                if let best = finder.savedBest {
+                    Divider().overlay(AppTheme.cardStroke(for: colorScheme))
+                    HStack(alignment: .center, spacing: 8) {
+                        Image(systemName: "star.fill")
+                            .font(.caption)
+                            .foregroundStyle(AppTheme.iranGreen)
+                        Text(savedBestSummary(best))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                        Spacer(minLength: 0)
+                        Button(L10n.t(.findBestClear)) {
+                            finder.clearSaved()
+                        }
+                        .font(.caption)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(AppTheme.iranRed)
+                        .accessibilityIdentifier("findBestClearButton")
+                    }
+                    Button {
+                        Task { await finder.connectToSavedBest() }
+                    } label: {
+                        Label(L10n.t(.findBestConnectSaved), systemImage: "star.circle.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(AppTheme.iranGreen)
+                    .disabled(!configReady || finder.isRunning)
+                    .accessibilityIdentifier("findBestConnectSavedButton")
+                }
+            }
+        }
+        .accessibilityIdentifier("findBestConnectionCard")
+    }
+
+    private func startFindBest() {
+        guard configReady, !proxyOnlyEnabled else { return }
+        if !SharedSettingsStore.shared.appSettings.hasAcceptedConnectionDisclaimer {
+            startFindBestAfterDisclaimer = true
+            showDisclosure = true
+            return
+        }
+        finder.start()
+    }
+
+    private func savedBestSummary(_ best: BestConnectionRecord) -> String {
+        let proto = SettingsLabels.protocolName(best.protocolSelection)
+        let country = best.region.isEmpty
+            ? L10n.t(.regionAny)
+            : RegionDisplayNames.pickerLabel(for: best.region)
+        let speed = String(format: "%.1f", best.mbps)
+        return "\(L10n.t(.findBestSavedLabelPrefix)) \(proto) · \(country) · \(speed) Mbps"
     }
 
     private var header: some View {

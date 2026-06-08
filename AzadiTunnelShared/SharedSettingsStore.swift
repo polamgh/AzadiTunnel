@@ -272,6 +272,40 @@ final class SharedSettingsStore {
         set { defaults?.set(newValue, forKey: AppGroupConstants.bypassRoutesAppliedCountKey) }
     }
 
+    // MARK: - Find Best Connection
+
+    /// The best protocol/region the auto-scan saved. Stored separately from the user's manual
+    /// `protocolSelection` / `egressRegion`, so the manual connection system is never overwritten.
+    var bestConnection: BestConnectionRecord? {
+        guard let raw = defaults?.string(forKey: AppGroupConstants.bestConnectionProtocolKey),
+              let proto = AppSettings.ProtocolSelection(rawValue: raw) else {
+            return nil
+        }
+        let region = defaults?.string(forKey: AppGroupConstants.bestConnectionRegionKey) ?? ""
+        let mbps = defaults?.double(forKey: AppGroupConstants.bestConnectionMbpsKey) ?? 0
+        let ts = (defaults?.object(forKey: AppGroupConstants.bestConnectionUpdatedKey) as? Double) ?? 0
+        return BestConnectionRecord(
+            protocolSelection: proto,
+            region: region,
+            mbps: mbps,
+            updatedAt: ts > 0 ? Date(timeIntervalSince1970: ts) : nil
+        )
+    }
+
+    func saveBestConnection(protocolSelection: AppSettings.ProtocolSelection, region: String, mbps: Double) {
+        defaults?.set(protocolSelection.rawValue, forKey: AppGroupConstants.bestConnectionProtocolKey)
+        defaults?.set(region, forKey: AppGroupConstants.bestConnectionRegionKey)
+        defaults?.set(mbps, forKey: AppGroupConstants.bestConnectionMbpsKey)
+        defaults?.set(Date().timeIntervalSince1970, forKey: AppGroupConstants.bestConnectionUpdatedKey)
+    }
+
+    func clearBestConnection() {
+        defaults?.removeObject(forKey: AppGroupConstants.bestConnectionProtocolKey)
+        defaults?.removeObject(forKey: AppGroupConstants.bestConnectionRegionKey)
+        defaults?.removeObject(forKey: AppGroupConstants.bestConnectionMbpsKey)
+        defaults?.removeObject(forKey: AppGroupConstants.bestConnectionUpdatedKey)
+    }
+
     /// Shown in Secure DNS settings when `blockCleartextDNS` prevents fallback after resolver failure.
     var secureDNSWarning: String? {
         get { defaults?.string(forKey: AppGroupConstants.secureDNSWarningKey) }

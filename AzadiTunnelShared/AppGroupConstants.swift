@@ -37,6 +37,12 @@ enum AppGroupConstants {
     /// User-visible Secure DNS warning when cleartext DNS is blocked after resolver failure.
     static let secureDNSWarningKey = "secure_dns_warning"
     static let secureDNSCloudflareValidationKey = "secure_dns_cloudflare_validation"
+
+    /// "Find Best Connection": the saved best protocol/region the user can reconnect to directly.
+    static let bestConnectionProtocolKey = "best_connection_protocol"
+    static let bestConnectionRegionKey = "best_connection_region"
+    static let bestConnectionMbpsKey = "best_connection_mbps"
+    static let bestConnectionUpdatedKey = "best_connection_updated_at"
 }
 
 enum SharedLogEvent: String, CaseIterable {
@@ -162,6 +168,17 @@ enum SharedLogEvent: String, CaseIterable {
     case bypassDomainResolved = "BYPASS_DOMAIN_RESOLVED"
     case bypassDomainFailed = "BYPASS_DOMAIN_FAILED"
     case bypassProxyDisabledForRoutes = "BYPASS_PROXY_DISABLED_FOR_ROUTES"
+    case bestConnScanStarted = "BEST_CONNECTION_SCAN_STARTED"
+    case bestConnTesting = "BEST_CONNECTION_TESTING"
+    case bestConnConnectFailed = "BEST_CONNECTION_CONNECT_FAILED"
+    case bestConnSpeed = "BEST_CONNECTION_SPEED"
+    case bestConnBelowThreshold = "BEST_CONNECTION_BELOW_THRESHOLD"
+    case bestConnSaved = "BEST_CONNECTION_SAVED"
+    case bestConnScanNone = "BEST_CONNECTION_SCAN_NONE"
+    case bestConnScanCancelled = "BEST_CONNECTION_SCAN_CANCELLED"
+    case bestConnScanFinished = "BEST_CONNECTION_SCAN_FINISHED"
+    case bestConnConnectSaved = "BEST_CONNECTION_CONNECT_SAVED"
+    case bestConnCleared = "BEST_CONNECTION_CLEARED"
 }
 
 enum VPNStatusDisplay: String, Codable {

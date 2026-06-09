@@ -415,6 +415,20 @@ final class AppLanguageController: ObservableObject {
         case findBestSavedLabelPrefix
         case findBestClear
         case findBestProxyOnlyHint
+        case findBestMinSpeed
+        case findBestFoundHeader
+        case findBestFoundCountPrefix
+        case findBestBestBadge
+        case findBestConnectThis
+        case findBestOn
+        case findBestOff
+        case findBestWarningTitle
+        case findBestWarningMessage
+        case findBestWarningStart
+        case findBestContinueTitle
+        case findBestContinueMessage
+        case findBestContinueKeep
+        case findBestContinueStop
         case secureDnsRowTitle
         case secureDnsRowSubtitle
         case secureDnsNavTitle

@@ -9,6 +9,9 @@ struct DashboardView: View {
     @State private var configReady = SharedSettingsStore.shared.hasActivePsiphonConfig
     @State private var showDisclosure = false
     @State private var startFindBestAfterDisclaimer = false
+    @State private var showFindBestWarning = false
+    @State private var minMbps = SharedSettingsStore.shared.bestConnectionMinMbps
+    private let minMbpsOptions = [2, 5, 10, 15, 20, 30]
     @State private var durationText = "00:00:00"
     @State private var didRunConnectBootstrap = false
     @State private var diagnosticsExpanded = false
@@ -90,7 +93,7 @@ struct DashboardView: View {
                     showDisclosure = false
                     if startFindBestAfterDisclaimer {
                         startFindBestAfterDisclaimer = false
-                        finder.start()
+                        showFindBestWarning = true
                     } else {
                         Task { await vpn.connect() }
                     }
@@ -116,6 +119,21 @@ struct DashboardView: View {
             }
         } message: {
             Text(L10n.t(.proxyOnlyRequiresWifiMessage))
+        }
+        .alert(L10n.t(.findBestWarningTitle), isPresented: $showFindBestWarning) {
+            Button(L10n.t(.findBestWarningStart)) { finder.start() }
+            Button(L10n.t(.cancel), role: .cancel) {}
+        } message: {
+            Text(L10n.t(.findBestWarningMessage))
+        }
+        .alert(L10n.t(.findBestContinueTitle), isPresented: Binding(
+            get: { finder.awaitingContinuePrompt },
+            set: { _ in }
+        )) {
+            Button(L10n.t(.findBestContinueKeep)) { finder.resolveContinuePrompt(keepGoing: true) }
+            Button(L10n.t(.findBestContinueStop), role: .cancel) { finder.resolveContinuePrompt(keepGoing: false) }
+        } message: {
+            Text(L10n.t(.findBestContinueMessage))
         }
         .task {
             await vpn.refreshStatusFromSystem()
@@ -184,6 +202,22 @@ struct DashboardView: View {
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
 
+                if !finder.isRunning {
+                    HStack {
+                        Text(L10n.t(.findBestMinSpeed))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                        Spacer()
+                        Picker("", selection: $minMbps) {
+                            ForEach(minMbpsOptions, id: \.self) { Text("\($0) Mbps").tag($0) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(AppTheme.iranGreen)
+                        .onChange(of: minMbps) { newValue in finder.minMbps = newValue }
+                        .accessibilityIdentifier("findBestMinSpeedPicker")
+                    }
+                }
+
                 if finder.isRunning {
                     if !finder.progressLine.isEmpty {
                         HStack(spacing: 8) {
@@ -232,15 +266,12 @@ struct DashboardView: View {
                     }
                 }
 
-                if let best = finder.savedBest {
+                if !finder.results.isEmpty {
                     Divider().overlay(AppTheme.cardStroke(for: colorScheme))
-                    HStack(alignment: .center, spacing: 8) {
-                        Image(systemName: "star.fill")
-                            .font(.caption)
+                    HStack {
+                        Text(L10n.t(.findBestFoundHeader))
+                            .font(.caption.weight(.bold))
                             .foregroundStyle(AppTheme.iranGreen)
-                        Text(savedBestSummary(best))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(AppTheme.primaryText(for: colorScheme))
                         Spacer(minLength: 0)
                         Button(L10n.t(.findBestClear)) {
                             finder.clearSaved()
@@ -250,20 +281,73 @@ struct DashboardView: View {
                         .foregroundStyle(AppTheme.iranRed)
                         .accessibilityIdentifier("findBestClearButton")
                     }
-                    Button {
-                        Task { await finder.connectToSavedBest() }
-                    } label: {
-                        Label(L10n.t(.findBestConnectSaved), systemImage: "star.circle.fill")
-                            .frame(maxWidth: .infinity)
+                    ForEach(Array(finder.results.enumerated()), id: \.element.id) { index, result in
+                        foundConnectionRow(result, isBest: index == 0)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(AppTheme.iranGreen)
-                    .disabled(!configReady || finder.isRunning)
-                    .accessibilityIdentifier("findBestConnectSavedButton")
                 }
             }
         }
         .accessibilityIdentifier("findBestConnectionCard")
+    }
+
+    private func foundConnectionRow(_ result: FoundConnection, isBest: Bool) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: isBest ? "star.fill" : "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(AppTheme.iranGreen)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(foundConnectionTitle(result))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                Text(foundConnectionOptions(result))
+                    .font(.caption2)
+                    .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                if isBest {
+                    Text(L10n.t(.findBestBestBadge))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(AppTheme.iranGreen)
+                }
+            }
+            Spacer(minLength: 0)
+            Button(L10n.t(.findBestConnectThis)) {
+                Task { await finder.connect(to: result) }
+            }
+            .font(.caption.weight(.semibold))
+            .buttonStyle(.bordered)
+            .tint(AppTheme.iranGreen)
+            .disabled(!configReady || finder.isRunning)
+        }
+    }
+
+    private func foundConnectionTitle(_ result: FoundConnection) -> String {
+        let proto = result.protocolSelection.map { SettingsLabels.protocolName($0) } ?? result.protocolRaw
+        let country = result.region.isEmpty
+            ? L10n.t(.regionAny)
+            : RegionDisplayNames.pickerLabel(for: result.region)
+        let speed = String(format: "%.1f", result.mbps)
+        return "\(proto) · \(country) · \(speed) Mbps"
+    }
+
+    /// Second line of a found row: the server options (beast + Secure DNS) that produced the speed.
+    private func foundConnectionOptions(_ result: FoundConnection) -> String {
+        let beast = "\(L10n.t(.settingsBeastMode)) \(result.beastMode ? L10n.t(.findBestOn) : L10n.t(.findBestOff))"
+        let dns: String
+        switch result.dnsMode {
+        case .off: dns = "DNS \(L10n.t(.findBestOff))"
+        case .doh: dns = "DoH \(dnsProviderLabel(result.dnsProvider))"
+        case .dot: dns = "DoT \(dnsProviderLabel(result.dnsProvider))"
+        }
+        return "\(beast) · \(dns)"
+    }
+
+    private func dnsProviderLabel(_ provider: SecureDNSProvider) -> String {
+        switch provider {
+        case .cloudflare: return "Cloudflare"
+        case .google: return "Google"
+        case .quad9: return "Quad9"
+        case .adguard: return "AdGuard"
+        case .custom: return "Custom"
+        }
     }
 
     private func startFindBest() {
@@ -273,16 +357,8 @@ struct DashboardView: View {
             showDisclosure = true
             return
         }
-        finder.start()
-    }
-
-    private func savedBestSummary(_ best: BestConnectionRecord) -> String {
-        let proto = SettingsLabels.protocolName(best.protocolSelection)
-        let country = best.region.isEmpty
-            ? L10n.t(.regionAny)
-            : RegionDisplayNames.pickerLabel(for: best.region)
-        let speed = String(format: "%.1f", best.mbps)
-        return "\(L10n.t(.findBestSavedLabelPrefix)) \(proto) · \(country) · \(speed) Mbps"
+        // Warn about duration + data usage before starting the long scan.
+        showFindBestWarning = true
     }
 
     private var header: some View {

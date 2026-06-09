@@ -304,6 +304,32 @@ final class SharedSettingsStore {
         defaults?.removeObject(forKey: AppGroupConstants.bestConnectionRegionKey)
         defaults?.removeObject(forKey: AppGroupConstants.bestConnectionMbpsKey)
         defaults?.removeObject(forKey: AppGroupConstants.bestConnectionUpdatedKey)
+        defaults?.removeObject(forKey: AppGroupConstants.bestConnectionResultsKey)
+    }
+
+    /// User-selected minimum acceptable speed (Mbps); a candidate must reach this to be saved.
+    var bestConnectionMinMbps: Int {
+        get {
+            let v = defaults?.integer(forKey: AppGroupConstants.bestConnectionMinMbpsKey) ?? 0
+            return v > 0 ? v : 5
+        }
+        set { defaults?.set(max(1, newValue), forKey: AppGroupConstants.bestConnectionMinMbpsKey) }
+    }
+
+    /// All working connections found by the scan (kept sorted best-first by the finder).
+    var bestConnectionResults: [FoundConnection] {
+        get {
+            guard let data = defaults?.data(forKey: AppGroupConstants.bestConnectionResultsKey),
+                  let list = try? JSONDecoder().decode([FoundConnection].self, from: data) else {
+                return []
+            }
+            return list
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                defaults?.set(data, forKey: AppGroupConstants.bestConnectionResultsKey)
+            }
+        }
     }
 
     /// Shown in Secure DNS settings when `blockCleartextDNS` prevents fallback after resolver failure.

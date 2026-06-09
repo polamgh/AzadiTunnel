@@ -43,6 +43,10 @@ enum AppGroupConstants {
     static let bestConnectionRegionKey = "best_connection_region"
     static let bestConnectionMbpsKey = "best_connection_mbps"
     static let bestConnectionUpdatedKey = "best_connection_updated_at"
+    /// User-selected minimum acceptable speed (Mbps) for the scan; default 5.
+    static let bestConnectionMinMbpsKey = "best_connection_min_mbps"
+    /// All working connections found by the last scan (JSON array), best first.
+    static let bestConnectionResultsKey = "best_connection_results"
 }
 
 enum SharedLogEvent: String, CaseIterable {
@@ -179,6 +183,9 @@ enum SharedLogEvent: String, CaseIterable {
     case bestConnScanFinished = "BEST_CONNECTION_SCAN_FINISHED"
     case bestConnConnectSaved = "BEST_CONNECTION_CONNECT_SAVED"
     case bestConnCleared = "BEST_CONNECTION_CLEARED"
+    case bestConnMilestonePrompt = "BEST_CONNECTION_MILESTONE_PROMPT"
+    case bestConnMilestoneContinue = "BEST_CONNECTION_MILESTONE_CONTINUE"
+    case bestConnMilestoneStop = "BEST_CONNECTION_MILESTONE_STOP"
 }
 
 enum VPNStatusDisplay: String, Codable {

@@ -395,6 +395,14 @@ final class VPNController: ObservableObject {
         updateFromManager()
     }
 
+    /// Raw Network Extension connection status (read-only). Unlike `status`, this is NOT affected by
+    /// the optimistic-disconnect display shortcut, so callers can tell when the tunnel is *actually*
+    /// torn down. Used by the best-connection scanner to avoid starting a new probe while the
+    /// previous tunnel is still `.disconnecting`. Does not change any connection behavior.
+    var rawTunnelStatus: NEVPNStatus {
+        manager?.connection.status ?? .invalid
+    }
+
     func syncStatusFromSharedStore() {
         refreshStatistics()
         if manager != nil {

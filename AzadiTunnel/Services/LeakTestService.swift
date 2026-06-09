@@ -31,9 +31,19 @@ enum LeakTestService {
         SharedLogger.shared.logRaw("LEAK_TEST_IPV6_RESULT", detail: ipv6.logDetail)
 
         report.webRTCSummary = "WebRTC local-interface probe not available on iOS; no browser surface in VPN app."
-        report.verdict = evaluate(report: report, dns: dns, ipv6: ipv6)
-        report.detail = report.verdict.rawValue
-        SharedLogger.shared.logRaw("LEAK_TEST_RESULT", detail: "verdict=\(report.verdict.rawValue)")
+        let evaluation = evaluate(report: report, dns: dns, ipv6: ipv6)
+        report.verdict = evaluation.verdict
+        report.detail = evaluation.reason
+        let verdictToken: String
+        if evaluation.reason == "ipv6_linklocal_only" {
+            verdictToken = "OK"
+        } else {
+            verdictToken = evaluation.verdict.rawValue
+        }
+        SharedLogger.shared.logRaw(
+            "LEAK_TEST_RESULT",
+            detail: "verdict=\(verdictToken) reason=\(evaluation.reason)"
+        )
 
         ConnectionDiagnosticsStore.saveLeak(report)
         return report
@@ -124,7 +134,12 @@ enum LeakTestService {
                     let addr = interface.ifa_addr!.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0 }
                     inet_ntop(AF_INET6, &addr.pointee.sin6_addr, &buffer, socklen_t(INET6_ADDRSTRLEN))
                     let ip = String(cString: buffer)
-                    if ip.hasPrefix("fe80:") { linkLocal6 = true } else if !ip.isEmpty && ip != "::1" {
+                    if ip.hasPrefix("fe80:") {
+                        linkLocal6 = true
+                    } else if ip.hasPrefix("fc") || ip.hasPrefix("fd") {
+                        // ULA on utun — expected when messaging compat blackholes IPv6 in-tunnel.
+                        linkLocal6 = true
+                    } else if !ip.isEmpty && ip != "::1" {
                         global6 = true
                     }
                 }
@@ -146,23 +161,26 @@ enum LeakTestService {
         report: LeakTestReport,
         dns: (summary: String, logDetail: String, leaked: Bool),
         ipv6: (summary: String, logDetail: String, hasIPv6: Bool)
-    ) -> LeakTestVerdict {
+    ) -> (verdict: LeakTestVerdict, reason: String) {
+        if ipv6.hasIPv6 {
+            return (.warning, "ipv6_global_on_tunnel")
+        }
+        if dns.leaked {
+            return (.leakDetected, "dns_leak_detected")
+        }
+        if ipv6.logDetail.contains("ipv6_linklocal=true") {
+            return (.safe, "ipv6_linklocal_only")
+        }
         if report.publicIPBefore != "unavailable",
            report.publicIPAfter != "unavailable",
            report.publicIPBefore == report.publicIPAfter,
            !report.publicIPAfter.isEmpty {
-            return .warning
-        }
-        if ipv6.hasIPv6 && ipv6.summary.contains("global") {
-            return .warning
-        }
-        if dns.leaked {
-            return .leakDetected
+            return (.warning, "public_ip_unchanged")
         }
         if report.publicIPAfter == "unavailable" {
-            return .warning
+            return (.warning, "public_ip_unavailable")
         }
-        return .safe
+        return (.safe, "no_leak_detected")
     }
 
     private static func redactIP(_ value: String) -> String {

@@ -26,7 +26,7 @@ enum TunnelDnsForwarder {
         socksPort: Int,
         httpPort: Int
     ) -> Bool {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
         guard let parsed = parseDnsQuery(packet: packet) else { return false }
         let queryId = SecureDNSResolver.queryId(from: parsed.dnsPayload)
         guard let question = parseQuestion(parsed.dnsPayload) else {
@@ -59,15 +59,25 @@ enum TunnelDnsForwarder {
             "DNS_PACKET_RECEIVED",
             detail: "id=\(queryId) qname=\(question.qname) qtype=\(question.qtype) dst=\(dstIP):\(parsed.dstPort)"
         )
-        if question.qtype == 28, !SecureDNSConfiguration.isActive(settings) {
+        let baseSettings = SharedSettingsStore.shared.appSettings
+        if question.qtype == 28,
+           !SecureDNSConfiguration.isActive(settings)
+           || MessagingAppsConfiguration.prefersIPv4Only(settings: baseSettings, qname: question.qname) {
             queue.async {
                 let empty = buildEmptyNoErrorResponse(query: parsed.dnsPayload, question: question)
                 let out = buildUdpResponsePacket(from: parsed, dnsPayload: empty)
                 packetFlow.writePackets([out], withProtocols: [protocolNumber])
+                let ipv4Only = MessagingAppsConfiguration.prefersIPv4Only(settings: baseSettings, qname: question.qname)
                 SharedLogger.shared.logRaw(
                     "DNS_RESPONSE_SENT",
-                    detail: "id=\(queryId) secure=false qtype=AAAA_empty qname=\(question.qname)"
+                    detail: "id=\(queryId) secure=false qtype=AAAA_empty qname=\(question.qname) messaging_ipv4_only=\(ipv4Only)"
                 )
+                if ipv4Only {
+                    SharedLogger.shared.logRaw(
+                        "MESSAGING_IPV4_PREFERRED",
+                        detail: "id=\(queryId) qname=\(question.qname) action=aaaa_empty"
+                    )
+                }
             }
             return true
         }
@@ -76,11 +86,25 @@ enum TunnelDnsForwarder {
             return false
         }
 
+        if MessagingAppsConfiguration.isProtectedDomain(question.qname)
+            || MessagingAppsConfiguration.isWhatsAppDomain(question.qname) {
+            SharedLogger.shared.logRaw(
+                "MESSAGING_DNS_QUERY",
+                detail: "id=\(queryId) qname=\(question.qname) type=\(dnsTypeName(question.qtype))"
+            )
+        }
+        if MessagingAppsConfiguration.isWhatsAppDomain(question.qname) {
+            SharedLogger.shared.logRaw(
+                "WHATSAPP_DNS_QUERY",
+                detail: "id=\(queryId) qname=\(question.qname) type=\(dnsTypeName(question.qtype))"
+            )
+        }
+
         queue.async {
             Task {
-                let settings = SharedSettingsStore.shared.appSettings
+                let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
                 do {
-                    let (responsePayload, secure) = try await resolve(
+                    let (responsePayload, secure, resolvedProvider) = try await resolve(
                         query: parsed.dnsPayload,
                         question: question,
                         socksHost: socksHost,
@@ -97,6 +121,15 @@ enum TunnelDnsForwarder {
                         "DNS_RESPONSE_SENT",
                         detail: "id=\(queryId) secure=\(secure) bytes=\(responsePayload.count) qname=\(question.qname)"
                     )
+                    if MessagingAppsConfiguration.isProtectedDomain(question.qname)
+                        || MessagingAppsConfiguration.isWhatsAppDomain(question.qname) {
+                        MessagingAppsDiagnostics.logDnsAnswer(
+                            domain: question.qname,
+                            ips: SecureDNSResolver.ipv4Answers(from: responsePayload),
+                            secure: secure,
+                            provider: resolvedProvider
+                        )
+                    }
                     if dnsOkLogCount <= 3 || dnsOkLogCount % 100 == 0 {
                         SharedLogger.shared.log(.dnsForwardOk, detail: "id=\(queryId) bytes=\(responsePayload.count) n=\(dnsOkLogCount) secure=\(secure)")
                     }
@@ -147,7 +180,7 @@ enum TunnelDnsForwarder {
         )
 
         do {
-            let (payload, secure) = try await resolve(
+            let (payload, secure, _) = try await resolve(
                 query: query,
                 question: question,
                 socksHost: socksHost,
@@ -280,19 +313,37 @@ enum TunnelDnsForwarder {
         httpPort: Int,
         settings: AppSettings,
         queryId: UInt16
-    ) async throws -> (Data, Bool) {
+    ) async throws -> (Data, Bool, SecureDNSProvider?) {
         if SecureDNSConfiguration.isActive(settings) {
             do {
-                let result = try await SecureDNSResolver.resolve(
-                    wireQuery: query,
-                    queryId: queryId,
-                    qname: question.qname,
-                    settings: settings,
-                    socksPort: socksPort,
-                    httpPort: httpPort
-                )
+                let result: SecureDNSResolver.Result
+                let provider: SecureDNSProvider
+                if MessagingAppsConfiguration.isWhatsAppDomain(question.qname)
+                    || (MessagingAppsConfiguration.isProtectedDomain(question.qname)
+                        && SharedSettingsStore.shared.appSettings.messagingAppsCompatibilityModeEnabled) {
+                    let resolved = try await SecureDNSResolver.resolveForMessaging(
+                        wireQuery: query,
+                        queryId: queryId,
+                        qname: question.qname,
+                        settings: settings,
+                        socksPort: socksPort,
+                        httpPort: httpPort
+                    )
+                    result = resolved.result
+                    provider = resolved.provider
+                } else {
+                    result = try await SecureDNSResolver.resolve(
+                        wireQuery: query,
+                        queryId: queryId,
+                        qname: question.qname,
+                        settings: settings,
+                        socksPort: socksPort,
+                        httpPort: httpPort
+                    )
+                    provider = settings.secureDNSProvider
+                }
                 SharedSettingsStore.shared.secureDNSWarning = nil
-                return (result.payload, result.usedSecurePath)
+                return (result.payload, result.usedSecurePath, provider)
             } catch {
                 if settings.blockCleartextDNS {
                     SharedLogger.shared.log(.secureDnsCleartextBlocked, detail: "id=\(queryId) reason=\(error.localizedDescription)")
@@ -314,7 +365,7 @@ enum TunnelDnsForwarder {
                     socksPort: socksPort,
                     httpPort: httpPort
                 )
-                return (legacy, false)
+                return (legacy, false, nil)
             }
         }
         let legacy = try await resolveLegacy(
@@ -324,7 +375,7 @@ enum TunnelDnsForwarder {
             socksPort: socksPort,
             httpPort: httpPort
         )
-        return (legacy, false)
+        return (legacy, false, nil)
     }
 
     private static func dnsTypeName(_ qtype: UInt16) -> String {
@@ -563,6 +614,35 @@ enum TunnelDnsForwarder {
             packet.replaceSubrange((u + 8)..<packet.count, with: raw)
         }
         return packet
+    }
+
+    private static func extractAnswerIPs(_ payload: Data, qtype: UInt16) -> [String] {
+        guard let question = parseQuestion(payload) else { return [] }
+        let ancount = Int(UInt16(payload[6]) << 8 | UInt16(payload[7]))
+        guard ancount > 0 else { return [] }
+        var offset = question.questionEnd
+        var ips: [String] = []
+        for _ in 0..<ancount {
+            guard readDomainName(payload, offset: &offset) != nil, offset + 10 <= payload.count else { break }
+            let type = UInt16(payload[offset]) << 8 | UInt16(payload[offset + 1])
+            offset += 8
+            let rdlen = Int(UInt16(payload[offset - 2]) << 8 | UInt16(payload[offset - 1]))
+            guard offset + rdlen <= payload.count else { break }
+            let rdata = payload.subdata(in: offset ..< (offset + rdlen))
+            offset += rdlen
+            if type == 1, rdata.count == 4 {
+                ips.append("\(rdata[0]).\(rdata[1]).\(rdata[2]).\(rdata[3])")
+            } else if type == 28, rdata.count == 16 {
+                var buffer = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
+                rdata.withUnsafeBytes { raw in
+                    _ = inet_ntop(AF_INET6, raw.baseAddress, &buffer, socklen_t(INET6_ADDRSTRLEN))
+                }
+                ips.append(String(cString: buffer))
+            } else if type == qtype {
+                continue
+            }
+        }
+        return ips
     }
 
     private static func internetChecksum(data: Data, offset: Int, length: Int) -> UInt16 {

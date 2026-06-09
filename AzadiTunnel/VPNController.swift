@@ -29,12 +29,16 @@ final class VPNController: ObservableObject {
     private var reconnectTask: Task<Void, Never>?
     /// User tapped Disconnect — keep UI on Disconnected while iOS tears down the tunnel.
     private var optimisticDisconnect = false
+    /// Skip haptics until the first system status sync (avoids feedback on cold launch).
+    private var statusHapticsEnabled = false
+    private var isRecoveringFromNoInternet = false
 
     init() {
         Task { await refreshStatusFromSystem() }
     }
 
     func refreshStatusFromSystem() async {
+        defer { statusHapticsEnabled = true }
         do {
             manager = try await VPNProfileCoordinator.loadManager()
             if let manager {
@@ -44,6 +48,23 @@ final class VPNController: ObservableObject {
         } catch {
             lastError = error.localizedDescription
             banner = .vpnPermission
+        }
+    }
+
+    private func playVPNStatusHapticIfNeeded(from previous: VPNStatusDisplay, to new: VPNStatusDisplay) {
+        guard statusHapticsEnabled, previous != new else { return }
+        switch new {
+        case .connected:
+            HapticFeedback.vpnConnected()
+        case .disconnected:
+            switch previous {
+            case .connected, .connecting, .disconnecting:
+                HapticFeedback.vpnDisconnected()
+            case .disconnected, .error:
+                break
+            }
+        case .connecting, .disconnecting, .error:
+            break
         }
     }
 
@@ -256,6 +277,7 @@ final class VPNController: ObservableObject {
     }
 
     private func applyDisconnectedState() {
+        let previous = status
         TunnelStatisticsStore.markDisconnected()
         TunnelStatisticsStore.clearPublicIP()
         var appSettings = SharedSettingsStore.shared.appSettings
@@ -268,6 +290,7 @@ final class VPNController: ObservableObject {
         SharedSettingsStore.shared.vpnStatus = .disconnected
         banner = .none
         refreshStatistics()
+        playVPNStatusHapticIfNeeded(from: previous, to: .disconnected)
     }
 
     func handleConnectedSideEffects() async {
@@ -292,6 +315,14 @@ final class VPNController: ObservableObject {
             lastError = proxyOnly
                 ? "Proxy is up but connectivity check failed. See Logs for INTERNET_TEST_*."
                 : "VPN is up but internet check failed. See Logs for INTERNET_TEST_* and PSIPHON_PROXY_MODE."
+
+            let settings = SharedSettingsStore.shared.appSettings
+            if settings.autoRetryOnNoInternet, !isRecoveringFromNoInternet {
+                isRecoveringFromNoInternet = true
+                let recovered = await NoInternetRecoveryController.recover(vpn: self)
+                isRecoveringFromNoInternet = false
+                if recovered { return }
+            }
         }
         refreshStatistics()
         scheduleAutoReconnectIfNeeded()
@@ -404,16 +435,17 @@ final class VPNController: ObservableObject {
 
         let shared = SharedSettingsStore.shared.vpnStatus
         if status == .connecting || status == .disconnecting || shared == .connected || shared == .error {
+            let previous = status
             status = shared
             switch shared {
             case .connected:
                 statusMessage = "Connected"
-                if status != .connected { /* handled below */ }
             case .connecting: statusMessage = "Connecting…"
             case .disconnecting: statusMessage = "Disconnecting…"
             case .disconnected: statusMessage = "Disconnected"
             case .error: statusMessage = "Failed"
             }
+            playVPNStatusHapticIfNeeded(from: previous, to: shared)
         }
     }
 
@@ -422,7 +454,10 @@ final class VPNController: ObservableObject {
             if optimisticDisconnect {
                 applyDisconnectedState()
             } else {
-                status = SharedSettingsStore.shared.vpnStatus
+                let previous = status
+                let shared = SharedSettingsStore.shared.vpnStatus
+                status = shared
+                playVPNStatusHapticIfNeeded(from: previous, to: shared)
             }
             return
         }
@@ -451,6 +486,7 @@ final class VPNController: ObservableObject {
                 ? L10n.t(.proxyOnlyStatusConnected)
                 : "Connected"
             if previous != .connected {
+                playVPNStatusHapticIfNeeded(from: previous, to: .connected)
                 Task { await self.handleConnectedSideEffects() }
             }
         case .connecting, .reasserting:

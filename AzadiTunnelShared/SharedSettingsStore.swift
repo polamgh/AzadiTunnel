@@ -3,6 +3,13 @@ import Foundation
 final class SharedSettingsStore {
     static let shared = SharedSettingsStore()
 
+    private var lastLoggedVPNStatus: VPNStatusDisplay?
+
+    /// Settings overlay used inside the packet tunnel (messaging compatibility mode).
+    var tunnelEffectiveAppSettings: AppSettings {
+        MessagingAppsConfiguration.tunnelSettings(from: appSettings)
+    }
+
     private var defaults: UserDefaults? {
         UserDefaults(suiteName: AppGroupConstants.suiteName)
     }
@@ -118,6 +125,8 @@ final class SharedSettingsStore {
         }
         set {
             defaults?.set(newValue.rawValue, forKey: AppGroupConstants.vpnStatusKey)
+            guard lastLoggedVPNStatus != newValue else { return }
+            lastLoggedVPNStatus = newValue
             SharedLogger.shared.log(.vpnStatusChanged, detail: "status=\(newValue.rawValue)")
         }
     }

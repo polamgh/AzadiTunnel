@@ -185,7 +185,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
 
                 if !proxyOnly {
-                    SecureDNSConfiguration.logStartupStatus(appSettings)
+                    SecureDNSConfiguration.logStartupStatus(SharedSettingsStore.shared.tunnelEffectiveAppSettings)
                     SharedLogger.shared.log(.packetForwardingStartRequested)
                     let forwarder = PacketTunnelTrafficForwarder(
                         packetFlow: self.packetFlow,
@@ -325,8 +325,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     detail: "using_psiphon_http reason=doh_probe_failed block_cleartext=false"
                 )
                 SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BYPASS_DETECTED",
-                    detail: "reason=system_http_bridge_doh_probe_failed_using_psiphon_http block_cleartext=false"
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_bridge_doh_probe_failed block_cleartext=false"
                 )
             }
             return false
@@ -630,26 +630,48 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         // Iran / custom / domain bypass: matching destination IPs leave through the device's normal
         // interface instead of the tunnel. iOS honors excludedRoutes at the IP layer.
-        let bypassEnabled = SharedSettingsStore.shared.appSettings.bypassIranIPsEnabled
-        let excluded = bypassEnabled ? Self.buildBypassExcludedRoutes() : []
+        let store = SharedSettingsStore.shared
+        let appSettings = store.appSettings
+        let bypassEnabled = appSettings.bypassIranIPsEnabled
+        let (excluded, excludedBypassRoutes) = bypassEnabled
+            ? Self.buildBypassExcludedRoutes()
+            : (neRoutes: [NEIPv4Route](), bypassRoutes: [BypassRoute]())
+        let mtu = MessagingAppsConfiguration.tunnelMTU(for: appSettings)
         if !excluded.isEmpty {
             ipv4.excludedRoutes = excluded
         }
         settings.ipv4Settings = ipv4
-        settings.mtu = NSNumber(value: 1500)
+        settings.mtu = NSNumber(value: mtu)
+        SharedLogger.shared.logRaw("TUNNEL_MTU", detail: "mtu=\(mtu) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled)")
+
+        if appSettings.messagingAppsCompatibilityModeEnabled {
+            let ipv6 = NEIPv6Settings(addresses: ["fd00::2"], networkPrefixLengths: [64])
+            ipv6.includedRoutes = [NEIPv6Route.default()]
+            settings.ipv6Settings = ipv6
+            SharedLogger.shared.logRaw(
+                "TUNNEL_IPV6_BLACKHOLE",
+                detail: "enabled=true policy=included_default_route relay=none"
+            )
+        }
 
         // Virtual DNS on the tunnel; UDP/53 is answered in TunnelDnsForwarder.
-        let appSettings = SharedSettingsStore.shared.appSettings
-        let dnsServers = SecureDNSConfiguration.advertisedDnsServers(for: appSettings)
+        let tunnelSettings = store.tunnelEffectiveAppSettings
+        let dnsServers = SecureDNSConfiguration.advertisedDnsServers(for: tunnelSettings)
         let dns = NEDNSSettings(servers: dnsServers)
         dns.matchDomains = [""]
         settings.dnsSettings = dns
-        if SecureDNSConfiguration.isActive(appSettings) {
+        if SecureDNSConfiguration.isActive(tunnelSettings) {
             SharedLogger.shared.logRaw(
                 "TUNNEL_DNS_ADVERTISED",
-                detail: "servers=\(dnsServers.joined(separator: ",")) mode=\(appSettings.secureDNSMode.rawValue) provider=\(appSettings.secureDNSProvider.rawValue)"
+                detail: "servers=\(dnsServers.joined(separator: ",")) mode=\(tunnelSettings.secureDNSMode.rawValue) provider=\(tunnelSettings.secureDNSProvider.rawValue) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled)"
             )
         }
+        MessagingAppsDiagnostics.logCompatibilityStartup(
+            settings: appSettings,
+            excludedRoutes: excludedBypassRoutes,
+            mtu: mtu
+        )
+        MessagingAppsDiagnostics.runDomainChecks(excludedRoutes: excludedBypassRoutes)
 
         // System HTTP proxy (matchDomains=[""]) makes iOS send ALL HTTP/HTTPS to the Psiphon loopback
         // proxy. In this architecture that proxy also carries general internet / public-IP checks, so
@@ -667,10 +689,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // Strict IP bypass mode may also drop the proxy when there is at least one route to honor.
         let strictMode = SharedSettingsStore.shared.appSettings.bypassStrictModeEnabled
         let disableProxyForBypass = bypassEnabled && strictMode && !excluded.isEmpty
-        let wantsSecureDnsBridge = SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: appSettings)
-        let disableProxyForSecureDNS = SecureDNSConfiguration.isActive(appSettings)
+        let wantsSecureDnsBridge = SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: tunnelSettings)
+        let disableProxyForSecureDNS = SecureDNSConfiguration.isActive(tunnelSettings)
             && !secureDnsSystemProxyActive
-            && appSettings.blockCleartextDNS
+            && tunnelSettings.blockCleartextDNS
         if disableProxyForSecureDNS {
             SharedLogger.shared.logRaw(
                 "SECURE_DNS_SYSTEM_PROXY",
@@ -687,7 +709,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             proxy.excludeSimpleHostnames = false
             proxy.matchDomains = [""]
             let proxyPort = SecureDNSConfiguration.systemHTTPProxyPort(
-                for: appSettings,
+                for: tunnelSettings,
                 psiphonHttpPort: endpoints.httpPort,
                 bridgeActive: secureDnsSystemProxyActive
             )
@@ -710,17 +732,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     detail: "using_psiphon_http port=\(proxyPort) reason=bridge_unavailable"
                 )
                 SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BYPASS_DETECTED",
-                    detail: "reason=system_http_bridge_unavailable_using_psiphon_http block_cleartext=false"
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_bridge_unavailable block_cleartext=false"
                 )
-            } else if SecureDNSConfiguration.isActive(appSettings) {
+            } else if SecureDNSConfiguration.isActive(tunnelSettings) {
                 SharedLogger.shared.logRaw(
                     "SECURE_DNS_SYSTEM_PROXY",
-                    detail: "using_psiphon_http_keep_connectivity port=\(proxyPort) mode=\(appSettings.secureDNSMode.rawValue)"
+                    detail: "using_psiphon_http_keep_connectivity port=\(proxyPort) mode=\(tunnelSettings.secureDNSMode.rawValue)"
                 )
                 SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BYPASS_DETECTED",
-                    detail: "reason=system_http_proxy_uses_psiphon_http secure_dns_mode=\(appSettings.secureDNSMode.rawValue)"
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_proxy_uses_psiphon_http secure_dns_mode=\(tunnelSettings.secureDNSMode.rawValue)"
                 )
             }
             SharedLogger.shared.logRaw(
@@ -747,9 +769,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     ///
     /// Reads everything from App Group storage so it works even if the app was killed while the
     /// tunnel kept running. De-duplicates across all three sources and publishes the applied count.
-    private static func buildBypassExcludedRoutes() -> [NEIPv4Route] {
+    private static func buildBypassExcludedRoutes() -> (neRoutes: [NEIPv4Route], bypassRoutes: [BypassRoute]) {
         let store = SharedSettingsStore.shared
         let settings = store.appSettings
+        let messagingCompat = settings.messagingAppsCompatibilityModeEnabled
 
         var collected: [BypassRoute] = []
         var seen = Set<BypassRoute>()
@@ -776,17 +799,32 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         // 3) Resolved domain IPs (as /32).
         let domainMap = store.bypassDomainResolvedIPs
-        for (_, ips) in domainMap {
-            add(BypassRoutes.parseList(ips)) // bare IPs parse to /32
+        for (domain, ips) in domainMap {
+            if messagingCompat, MessagingAppsConfiguration.isProtectedDomain(domain) {
+                SharedLogger.shared.logRaw(
+                    "MESSAGING_BYPASS_DOMAIN_SKIPPED",
+                    detail: "domain=\(domain) ips=\(ips.joined(separator: ","))"
+                )
+                continue
+            }
+            add(BypassRoutes.parseList(ips))
         }
 
-        let neRoutes = collected.map { NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask) }
+        let filtered = MessagingAppsConfiguration.filterExcludedRoutes(collected, compatibilityMode: messagingCompat)
+        if !filtered.removed.isEmpty {
+            SharedLogger.shared.logRaw(
+                "MESSAGING_BYPASS_PROTECTED",
+                detail: "removed=\(filtered.removed.count) sample=\(filtered.removed.prefix(4).map(\.cidr).joined(separator: ","))"
+            )
+        }
+
+        let neRoutes = filtered.filtered.map { NEIPv4Route(destinationAddress: $0.address, subnetMask: $0.mask) }
         store.bypassRoutesAppliedCount = neRoutes.count
         SharedLogger.shared.log(
             .bypassIranRoutesApplied,
-            detail: "count=\(neRoutes.count) iran=\(iranLines.count) custom=\(customRoutes.count) domains=\(domainMap.count)"
+            detail: "count=\(neRoutes.count) iran=\(iranLines.count) custom=\(customRoutes.count) domains=\(domainMap.count) messaging_compat=\(messagingCompat)"
         )
-        return neRoutes
+        return (neRoutes, filtered.filtered)
     }
 
     /// Minimal tunnel settings for Proxy Only — extension stays alive; no routes, DNS, or system proxy.

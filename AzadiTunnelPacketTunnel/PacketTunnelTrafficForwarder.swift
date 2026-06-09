@@ -10,6 +10,8 @@ import tun2socks
 /// SOCKS: tun2socks (TCP). HTTP: tunnel proxy settings + packet pump.
 final class PacketTunnelTrafficForwarder {
     private static var tunTcpSeen = 0
+    private static var udpDropLogged = Set<String>()
+    private static var ipv6DropLogged = 0
 
     private let packetFlow: NEPacketTunnelFlow
     private let socksHost: String
@@ -116,9 +118,31 @@ final class PacketTunnelTrafficForwarder {
                 guard packet.count >= 1 else { continue }
                 let version = packet[0] >> 4
                 if version == 6 {
+                    if Self.ipv6DropLogged < 8 {
+                        Self.ipv6DropLogged += 1
+                        if SharedSettingsStore.shared.appSettings.messagingAppsCompatibilityModeEnabled {
+                            SharedLogger.shared.logRaw(
+                                "IPV6_BLACKHOLED",
+                                detail: "len=\(packet.count) reason=messaging_compat_no_relay"
+                            )
+                        }
+                        MessagingAppsDiagnostics.logIpv6Dropped(length: packet.count)
+                    }
                     continue
                 }
                 guard version == 4 else { continue }
+
+                if packet.count >= 20, packet[9] == 17,
+                   let udp = Self.udpEndpoints(packet), udp.dstPort != 53 {
+                    let key = "\(udp.dstIP):\(udp.dstPort)"
+                    if Self.udpDropLogged.insert(key).inserted {
+                        MessagingAppsDiagnostics.logUdpDropped(
+                            destIP: udp.dstIP,
+                            destPort: udp.dstPort,
+                            length: packet.count
+                        )
+                    }
+                }
 
                 if packet.count >= 20, packet[9] == 6 {
                     Self.tunTcpSeen += 1
@@ -169,6 +193,15 @@ final class PacketTunnelTrafficForwarder {
         let dst = UInt16(packet[ihl + 2]) << 8 | UInt16(packet[ihl + 3])
         return (src, dst)
     }
+
+    private static func udpEndpoints(_ packet: Data) -> (dstIP: String, dstPort: UInt16)? {
+        guard packet.count >= 20, packet[0] >> 4 == 4, packet[9] == 17 else { return nil }
+        let ihl = Int(packet[0] & 0x0f) * 4
+        guard packet.count >= ihl + 4 else { return nil }
+        let dstIP = "\(packet[16]).\(packet[17]).\(packet[18]).\(packet[19])"
+        let dst = UInt16(packet[ihl + 2]) << 8 | UInt16(packet[ihl + 3])
+        return (dstIP, dst)
+    }
 }
 
 #if canImport(tun2socks)
@@ -192,9 +225,15 @@ private final class SocksTun2SocksDelegate: NSObject, TSIPStackDelegate {
         var peer = sock.destinationAddress
         let peerPort = sock.destinationPort
         let peerIP = String(cString: inet_ntoa(peer))
-        if peerIP.hasPrefix("149.154.") || peerIP.hasPrefix("91.108.") {
+        switch MessagingAppsConfiguration.messagingApp(host: peerIP, port: peerPort) {
+        case .telegram:
             SharedLogger.shared.logRaw("TUN_SOCKS_ACCEPT", detail: "telegram=\(peerIP):\(peerPort)")
+        case .whatsapp:
+            SharedLogger.shared.logRaw("TUN_SOCKS_ACCEPT", detail: "whatsapp=\(peerIP):\(peerPort)")
+        case .messaging, .other:
+            break
         }
+        TcpRelayDiagnostics.logTunAccept(host: peerIP, port: peerPort)
         let session = SOCKS5TunnelSession(
             tcpSocket: sock,
             proxyHost: socksHost,

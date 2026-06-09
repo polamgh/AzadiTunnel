@@ -27,6 +27,7 @@ struct SettingsView: View {
                 proxyOnlySection
                 shareProxySection
                 bypassSection
+                messagingAppsSection
                 secureDnsSection
                 behaviorSection
                 advancedSection
@@ -309,6 +310,22 @@ struct SettingsView: View {
         }
     }
 
+    private var messagingAppsSection: some View {
+        Section {
+            NavigationLink {
+                MessagingAppsSettingsView()
+            } label: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(L10n.t(.messagingCompatRowTitle))
+                    Text(L10n.t(.messagingCompatRowSubtitle))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("messagingCompatRow")
+        }
+    }
+
     private var secureDnsSection: some View {
         Section {
             NavigationLink {
@@ -329,6 +346,11 @@ struct SettingsView: View {
         Section(L10n.t(.settingsBehavior)) {
             Toggle(L10n.t(.settingsSmartFallback), isOn: $settings.smartFallbackChainEnabled)
                 .onChange(of: settings.smartFallbackChainEnabled) { _ in persist("smart_fallback_chain") }
+            Toggle(L10n.t(.settingsAutoRetryNoInternet), isOn: $settings.autoRetryOnNoInternet)
+                .onChange(of: settings.autoRetryOnNoInternet) { _ in persist("auto_retry_no_internet") }
+            Text(L10n.t(.settingsAutoRetryNoInternetHelp))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             Toggle(L10n.t(.settingsAutoReconnect), isOn: $settings.autoReconnect)
                 .onChange(of: settings.autoReconnect) { _ in persist("auto_reconnect") }
             Toggle(L10n.t(.settingsConnectOnLaunch), isOn: $settings.connectOnLaunch)

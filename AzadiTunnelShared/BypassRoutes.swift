@@ -83,6 +83,16 @@ enum BypassRoutes {
         ipv4Octets(ip) != nil
     }
 
+    /// True when `ip` falls inside `route` (network address + prefix).
+    static func contains(ip: String, in route: BypassRoute) -> Bool {
+        guard let octets = ipv4Octets(ip) else { return false }
+        let addr = UInt32(octets[0]) << 24 | UInt32(octets[1]) << 16 | UInt32(octets[2]) << 8 | UInt32(octets[3])
+        guard let netOctets = ipv4Octets(route.address) else { return false }
+        let network = UInt32(netOctets[0]) << 24 | UInt32(netOctets[1]) << 16 | UInt32(netOctets[2]) << 8 | UInt32(netOctets[3])
+        let mask: UInt32 = route.prefix == 0 ? 0 : ~UInt32(0) << (32 - route.prefix)
+        return (addr & mask) == (network & mask)
+    }
+
     private static func dotted(_ value: UInt32) -> String {
         "\((value >> 24) & 0xFF).\((value >> 16) & 0xFF).\((value >> 8) & 0xFF).\(value & 0xFF)"
     }

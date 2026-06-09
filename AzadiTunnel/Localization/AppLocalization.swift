@@ -101,6 +101,22 @@ final class AppLanguageController: ObservableObject {
         case fallbackLastFailed
         case fallbackReason
         case fallbackSuccess
+        case smartRecoveryWorking
+        case smartRecoveryTitle
+        case smartRecoveryPhase
+        case smartRecoveryProgress
+        case smartRecoverySuccess
+        case smartRecoveryExhausted
+        case smartRecoveryPhaseSavedBest
+        case smartRecoveryPhaseTransportChain
+        case smartRecoveryPhaseClearEgress
+        case smartRecoveryPhaseEgressRegion
+        case smartRecoveryPhaseBeastAuto
+        case smartRecoveryPhaseMessagingCompat
+        case smartRecoveryPhaseSecureDnsOff
+        case smartRecoveryPhaseConduitPublic
+        case smartRecoveryPhaseConduitUncensor
+        case smartRecoveryPhaseDirectReconnect
         case aboutNavTitle
         case aboutMission
         case aboutPrivacyTitle
@@ -215,6 +231,8 @@ final class AppLanguageController: ObservableObject {
         case settingsProxySystem
         case settingsBehavior
         case settingsSmartFallback
+        case settingsAutoRetryNoInternet
+        case settingsAutoRetryNoInternetHelp
         case settingsAutoReconnect
         case settingsConnectOnLaunch
         case settingsVPNOnDemand
@@ -401,6 +419,20 @@ final class AppLanguageController: ObservableObject {
         case bypassStrictSection
         case bypassStrictToggle
         case bypassStrictDescription
+        case messagingCompatRowTitle
+        case messagingCompatRowSubtitle
+        case messagingCompatNavTitle
+        case messagingCompatToggle
+        case messagingCompatDescription
+        case messagingCompatMtuSection
+        case messagingCompatMtu
+        case messagingCompatMtuHint
+        case messagingCompatFeaturesSection
+        case messagingCompatFeatureBypass
+        case messagingCompatFeatureDns
+        case messagingCompatFeatureFallback
+        case messagingCompatFeatureUdpNote
+        case messagingCompatReconnectNote
         case secureDnsRowTitle
         case secureDnsRowSubtitle
         case secureDnsNavTitle
@@ -495,6 +527,22 @@ final class AppLanguageController: ObservableObject {
         .fallbackLastFailed: "Last failed",
         .fallbackReason: "Reason",
         .fallbackSuccess: "Succeeded",
+        .smartRecoveryWorking: "Finding a working route…",
+        .smartRecoveryTitle: "Smart recovery",
+        .smartRecoveryPhase: "Strategy",
+        .smartRecoveryProgress: "Progress",
+        .smartRecoverySuccess: "Recovered via",
+        .smartRecoveryExhausted: "All strategies failed",
+        .smartRecoveryPhaseSavedBest: "Saved best route",
+        .smartRecoveryPhaseTransportChain: "Transport fallback",
+        .smartRecoveryPhaseClearEgress: "Auto egress region",
+        .smartRecoveryPhaseEgressRegion: "Other egress region",
+        .smartRecoveryPhaseBeastAuto: "Auto + Beast",
+        .smartRecoveryPhaseMessagingCompat: "Messaging compatibility",
+        .smartRecoveryPhaseSecureDnsOff: "Disable Secure DNS",
+        .smartRecoveryPhaseConduitPublic: "Public Conduit",
+        .smartRecoveryPhaseConduitUncensor: "Broader Conduit peers",
+        .smartRecoveryPhaseDirectReconnect: "Direct reconnect",
         .aboutNavTitle: "About AzadiTunnel",
         .aboutMission: "AzadiTunnel is built to help users access a more open and reliable internet through privacy-focused tunneling technology.",
         .aboutPrivacyTitle: "Privacy-first",
@@ -561,6 +609,22 @@ final class AppLanguageController: ObservableObject {
         .fallbackLastFailed: "آخرین خطا",
         .fallbackReason: "دلیل",
         .fallbackSuccess: "موفق",
+        .smartRecoveryWorking: "در حال یافتن مسیر مناسب…",
+        .smartRecoveryTitle: "بازیابی هوشمند",
+        .smartRecoveryPhase: "استراتژی",
+        .smartRecoveryProgress: "پیشرفت",
+        .smartRecoverySuccess: "موفق با",
+        .smartRecoveryExhausted: "همهٔ استراتژی‌ها ناموفق",
+        .smartRecoveryPhaseSavedBest: "مسیر ذخیره‌شده",
+        .smartRecoveryPhaseTransportChain: "جایگزین حمل‌ونقل",
+        .smartRecoveryPhaseClearEgress: "منطقه خروجی خودکار",
+        .smartRecoveryPhaseEgressRegion: "منطقه خروجی دیگر",
+        .smartRecoveryPhaseBeastAuto: "Auto + Beast",
+        .smartRecoveryPhaseMessagingCompat: "سازگاری پیام‌رسان",
+        .smartRecoveryPhaseSecureDnsOff: "غیرفعال‌کردن DNS امن",
+        .smartRecoveryPhaseConduitPublic: "Conduit عمومی",
+        .smartRecoveryPhaseConduitUncensor: "رله‌های بیشتر Conduit",
+        .smartRecoveryPhaseDirectReconnect: "اتصال مستقیم مجدد",
         .aboutNavTitle: "دربارهٔ AzadiTunnel",
         .aboutMission: "AzadiTunnel برای دسترسی به اینترنت بازتر و پایدارتر با فناوری تونل متمرکز بر حریم خصوصی ساخته شده است.",
         .aboutPrivacyTitle: "حریم خصوصی",

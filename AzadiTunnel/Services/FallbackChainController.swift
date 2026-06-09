@@ -14,6 +14,14 @@ enum FallbackChainController {
         let cdn = Step(transport: .cdn, protocolSelection: .cdnFronting, beast: true, timeoutSeconds: settings.fallbackTimeoutCDN)
         let auto = Step(transport: .autoBeast, protocolSelection: .auto, beast: true, timeoutSeconds: settings.fallbackTimeoutAutoBeast)
         let direct = Step(transport: .direct, protocolSelection: .direct, beast: false, timeoutSeconds: settings.fallbackTimeoutDirect)
+        if settings.messagingAppsCompatibilityModeEnabled {
+            switch selection {
+            case .cdnFronting: return [cdn, auto, direct]
+            case .auto: return [cdn, auto, direct]
+            case .direct: return [cdn, direct]
+            case .conduit: return []
+            }
+        }
         switch selection {
         case .cdnFronting: return [cdn, auto, direct]
         case .auto: return [cdn, direct]
@@ -23,19 +31,37 @@ enum FallbackChainController {
     }
 
     static func shouldUseChain(for selection: AppSettings.ProtocolSelection) -> Bool {
-        guard SharedSettingsStore.shared.appSettings.smartFallbackChainEnabled else { return false }
+        let settings = SharedSettingsStore.shared.appSettings
+        if settings.messagingAppsCompatibilityModeEnabled, selection != .conduit {
+            return !steps(for: selection).isEmpty
+        }
+        guard settings.smartFallbackChainEnabled else { return false }
         guard selection != .conduit else { return false }
         return !steps(for: selection).isEmpty
     }
 
-    static func connectWithChain(vpn: VPNController) async -> Bool {
-        let original = SharedSettingsStore.shared.appSettings
+    static func connectWithChain(
+        vpn: VPNController,
+        baseSettings: AppSettings? = nil,
+        force: Bool = false,
+        runDiagnosticsOnSuccess: Bool = true
+    ) async -> Bool {
+        let original = baseSettings ?? SharedSettingsStore.shared.appSettings
+        if !force, !shouldUseChain(for: original.protocolSelection) {
+            return false
+        }
         let chainSteps = steps(for: original.protocolSelection)
+        guard !chainSteps.isEmpty else { return false }
         var state = FallbackChainState(isActive: true)
+        var winningSettings: AppSettings?
         ConnectionDiagnosticsStore.saveFallback(state)
         SharedLogger.shared.logRaw("FALLBACK_CHAIN_STARTED", detail: "steps=\(chainSteps.count)")
         defer {
-            SharedSettingsStore.shared.updateAppSettings(original, logKey: "fallback_restore_settings")
+            if let winningSettings {
+                SharedSettingsStore.shared.updateAppSettings(winningSettings, logKey: "best_server_saved")
+            } else {
+                SharedSettingsStore.shared.updateAppSettings(original, logKey: "fallback_restore_settings")
+            }
             var done = ConnectionDiagnosticsStore.loadFallback()
             done.isActive = false
             ConnectionDiagnosticsStore.saveFallback(done)
@@ -65,11 +91,15 @@ enum FallbackChainController {
                 state.succeededProtocol = protocolRaw
                 state.currentStep = step.transport
                 ConnectionDiagnosticsStore.saveFallback(state)
+                winningSettings = trial
                 SharedLogger.shared.logRaw(
                     "FALLBACK_SUCCESS",
                     detail: "transport=\(step.transport.rawValue) protocol=\(protocolRaw)"
                 )
-                await vpn.runPostConnectDiagnostics()
+                if runDiagnosticsOnSuccess {
+                    await vpn.runPostConnectDiagnostics()
+                }
+                persistBestServerSelection(transport: step.transport, tunnelProtocol: protocolRaw)
                 return true
             }
 
@@ -93,18 +123,26 @@ enum FallbackChainController {
     }
 
     private static func waitForConnected(_ timeout: TimeInterval) async -> Bool {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if SharedSettingsStore.shared.vpnStatus == .connected,
-               SharedSettingsStore.shared.lastInternetTestOK {
-                return true
-            }
-            if SharedSettingsStore.shared.psiphonTunnelEstablished {
-                let ok = await InternetConnectivityTest.waitForExtensionResult(timeoutSeconds: 30)
-                if ok { return true }
-            }
-            try? await TaskSleep.seconds(2)
-        }
-        return SharedSettingsStore.shared.vpnStatus == .connected && SharedSettingsStore.shared.lastInternetTestOK
+        await InternetConnectivityTest.waitForConnectedTunnel(timeoutSeconds: timeout)
+    }
+
+    private static func persistBestServerSelection(transport: FallbackStep, tunnelProtocol: String) {
+        let quality = ConnectionDiagnosticsStore.loadQuality()
+        let latency = quality?.latencyMs ?? -1
+        let selection = BestServerSelection(
+            transport: transport.rawValue,
+            tunnelProtocol: tunnelProtocol,
+            latencyMs: latency,
+            cdnEdgeIP: quality?.cdnEdgeIP ?? "",
+            cdnSNI: quality?.cdnSNI ?? "",
+            selectedAt: Date()
+        )
+        ConnectionDiagnosticsStore.saveBestServer(selection)
+        var detail = "transport=\(transport.rawValue) protocol=\(tunnelProtocol)"
+        if latency >= 0 { detail += " latency_ms=\(latency)" }
+        if !selection.cdnEdgeIP.isEmpty { detail += " fronting_ip=\(selection.cdnEdgeIP)" }
+        if !selection.cdnSNI.isEmpty { detail += " fronting_sni=\(selection.cdnSNI)" }
+        SharedLogger.shared.logRaw("BEST_SERVER_SELECTED", detail: detail)
+        SharedLogger.shared.logRaw("BEST_SERVER_SAVED", detail: detail)
     }
 }

@@ -13,6 +13,8 @@ enum Socks5TCPClient {
         case connectRejected(rep: UInt8)
         case httpNoHeaders
         case timeout(String)
+        case remoteClosed
+        case connectionCancelled
 
         var errorDescription: String? {
             switch self {
@@ -21,6 +23,8 @@ enum Socks5TCPClient {
             case .connectRejected(let rep): return "connect_rejected:\(rep)"
             case .httpNoHeaders: return "http_no_headers"
             case .timeout(let stage): return "timeout:\(stage)"
+            case .remoteClosed: return "remote_closed"
+            case .connectionCancelled: return "connection_cancelled"
             }
         }
     }
@@ -104,22 +108,43 @@ enum Socks5TCPClient {
         useHostOverrides: Bool = true,
         readyTimeout: TimeInterval = 5,
         methodTimeout: TimeInterval = 5,
-        connectReplyTimeout: TimeInterval = 8
+        connectReplyTimeout: TimeInterval = 8,
+        diagnostics: TcpRelayDiagnostics.SessionContext? = nil
     ) async throws -> NWConnection {
+        let timeouts = MessagingAppsConfiguration.socksRelayTimeouts(for: targetHost, port: targetPort)
+        let readyTO = readyTimeout == 5 ? timeouts.ready : readyTimeout
+        let methodTO = methodTimeout == 5 ? timeouts.method : methodTimeout
+        let connectTO = connectReplyTimeout == 8 ? timeouts.connectReply : connectReplyTimeout
         _ = httpPort
+
+        diagnostics?.log(
+            "TCP_RELAY_SOCKS_BEGIN",
+            detail: "proxy=\(proxyHost):\(proxyPort) timeouts=\(timeouts.profile) ready=\(Int(readyTO)) method=\(Int(methodTO)) connect_reply=\(Int(connectTO))"
+        )
+
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(proxyHost),
             port: NWEndpoint.Port(integerLiteral: UInt16(proxyPort))
         )
-        let connection = NWConnection(to: endpoint, using: .tcp)
-        try await waitReady(connection, timeout: readyTimeout)
+        let connection = NWConnection(to: endpoint, using: connectionParameters(for: targetHost, port: targetPort))
+        let readyStarted = Date()
+        try await waitReady(connection, timeout: readyTO)
+        diagnostics?.log(
+            "TCP_RELAY_SOCKS_READY",
+            detail: "ms=\(Int(Date().timeIntervalSince(readyStarted) * 1000))"
+        )
 
         try await sendAll(connection, data: Data([0x05, 0x01, 0x00]))
-        let methodReply = try await receiveExact(connection, count: 2, timeout: methodTimeout)
+        let methodReply = try await receiveExact(connection, count: 2, timeout: methodTO)
         guard methodReply[0] == 0x05, methodReply[1] == 0x00 else {
+            diagnostics?.log(
+                "TCP_RELAY_SOCKS_METHOD_FAIL",
+                detail: "rep=\(methodReply.map { String($0) }.joined(separator: ","))"
+            )
             SharedLogger.shared.log(.internetTestFailed, detail: "socks_method rep=\(methodReply.map { String($0) }.joined(separator: ","))")
             throw Socks5Error.handshakeFailed
         }
+        diagnostics?.log("TCP_RELAY_SOCKS_METHOD_OK", detail: "auth=none")
 
         let connectHost = useHostOverrides ? socksTargetHost(for: targetHost) : targetHost
         var connect = Data([0x05, 0x01, 0x00])
@@ -134,9 +159,32 @@ enum Socks5TCPClient {
         }
         connect.append(UInt8(targetPort >> 8))
         connect.append(UInt8(targetPort & 0xff))
+        let connectStarted = Date()
+        diagnostics?.log(
+            "TCP_RELAY_SOCKS_CONNECT_SENT",
+            detail: "target=\(connectHost):\(targetPort) overridden=\(connectHost != targetHost)"
+        )
         try await sendAll(connection, data: connect)
-        try await consumeConnectReply(connection, timeout: connectReplyTimeout)
+        try await consumeConnectReply(connection, timeout: connectTO)
+        diagnostics?.log(
+            "TCP_RELAY_SOCKS_CONNECT_OK",
+            detail: "ms=\(Int(Date().timeIntervalSince(connectStarted) * 1000))"
+        )
         return connection
+    }
+
+    private static func connectionParameters(for host: String, port: UInt16) -> NWParameters {
+        let tcp = NWProtocolTCP.Options()
+        tcp.connectionTimeout = Int(
+            MessagingAppsConfiguration.socksRelayTimeouts(for: host, port: port).connectReply.rounded(.up)
+        )
+        if MessagingAppsConfiguration.isMessagingTcpEndpoint(host: host, port: port) {
+            tcp.enableKeepalive = true
+            tcp.keepaliveIdle = 30
+            tcp.keepaliveCount = 4
+            tcp.keepaliveInterval = 15
+        }
+        return NWParameters(tls: nil, tcp: tcp)
     }
 
     /// Read and discard the full RFC 1928 CONNECT reply so later reads are DNS payload only.
@@ -185,7 +233,7 @@ enum Socks5TCPClient {
                 } else if let data, !data.isEmpty {
                     _ = gate.resume(cont, returning: data)
                 } else {
-                    _ = gate.resume(cont, throwing: Socks5Error.connectFailed)
+                    _ = gate.resume(cont, throwing: Socks5Error.remoteClosed)
                 }
             }
         }
@@ -211,7 +259,7 @@ enum Socks5TCPClient {
                     _ = gate.resume(cont, throwing: err)
                 case .cancelled:
                     connection.stateUpdateHandler = nil
-                    _ = gate.resume(cont, throwing: Socks5Error.connectFailed)
+                    _ = gate.resume(cont, throwing: Socks5Error.connectionCancelled)
                 default:
                     break
                 }

@@ -310,6 +310,10 @@ struct DashboardView: View {
                 let f = ConnectionDiagnosticsStore.loadFallback()
                 return f.isActive || f.succeededStep != nil || f.exhausted
             }()
+            || {
+                let r = ConnectionDiagnosticsStore.loadSmartRecovery()
+                return r.isActive || r.succeededPhase != nil || r.exhausted
+            }()
     }
 
     private var diagnosticsCollapsibleSection: some View {
@@ -363,6 +367,32 @@ struct DashboardView: View {
                             }
                             if !quality.cdnSNI.isEmpty {
                                 diagnosticsRow(L10n.t(.qualityCDNSNI), quality.cdnSNI)
+                            }
+                        }
+                    }
+                    let recovery = ConnectionDiagnosticsStore.loadSmartRecovery()
+                    if recovery.isActive || recovery.succeededPhase != nil || recovery.exhausted {
+                        diagnosticsSubsection(title: L10n.t(.smartRecoveryTitle)) {
+                            diagnosticsRow(
+                                L10n.t(.smartRecoveryPhase),
+                                SmartRecoveryLabels.phaseName(recovery.currentPhase ?? recovery.succeededPhase)
+                            )
+                            if recovery.totalAttempts > 0 {
+                                diagnosticsRow(
+                                    L10n.t(.smartRecoveryProgress),
+                                    "\(recovery.attemptIndex)/\(recovery.totalAttempts)"
+                                )
+                            }
+                            if let succeeded = recovery.succeededPhase {
+                                diagnosticsRow(
+                                    L10n.t(.smartRecoverySuccess),
+                                    SmartRecoveryLabels.phaseName(succeeded)
+                                )
+                            } else if recovery.exhausted {
+                                diagnosticsRow(L10n.t(.smartRecoveryExhausted), "—")
+                            }
+                            if let reason = recovery.lastFailureReason.nilIfEmpty {
+                                diagnosticsRow(L10n.t(.fallbackReason), reason)
                             }
                         }
                     }
@@ -689,6 +719,14 @@ struct DashboardView: View {
     }
 
     private var localizedStatusMessage: String {
+        let recovery = ConnectionDiagnosticsStore.loadSmartRecovery()
+        if recovery.isActive {
+            let phase = SmartRecoveryLabels.phaseName(recovery.currentPhase)
+            if recovery.totalAttempts > 0, recovery.attemptIndex > 0 {
+                return "\(L10n.t(.smartRecoveryWorking)) (\(recovery.attemptIndex)/\(recovery.totalAttempts) · \(phase))"
+            }
+            return L10n.t(.smartRecoveryWorking)
+        }
         if showConduitProgress, vpn.status == .connecting,
            !vpn.statistics.conduitStatusLine.isEmpty {
             return vpn.statistics.conduitStatusLine

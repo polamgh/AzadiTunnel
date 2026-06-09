@@ -27,6 +27,8 @@ struct AppSettings: Codable, Equatable {
     var beastModeEnabled: Bool = true
     /// When enabled (and not Conduit), connect tries fallback chains: Auto → CDN then Direct; CDN mode → CDN, Auto+Beast, Direct.
     var smartFallbackChainEnabled: Bool = true
+    /// When the tunnel connects but the internet probe fails, disconnect and try fallback transports or another server.
+    var autoRetryOnNoInternet: Bool = true
     var fallbackTimeoutCDN: TimeInterval = 120
     var fallbackTimeoutAutoBeast: TimeInterval = 120
     var fallbackTimeoutDirect: TimeInterval = 120
@@ -77,6 +79,11 @@ struct AppSettings: Codable, Equatable {
     var customDoTHost: String = ""
     /// When Secure DNS is on and a query fails, block fallback to legacy DNS (SERVFAIL instead).
     var blockCleartextDNS: Bool = false
+
+    /// Improves Telegram / WhatsApp over full tunnel: lower MTU, protected bypass, DoH, transport retries.
+    var messagingAppsCompatibilityModeEnabled: Bool = false
+    /// Applied when ``messagingAppsCompatibilityModeEnabled`` is on (default 1280).
+    var messagingAppsTunnelMTU: MessagingTunnelMTU = .compat1280
 
     enum ConduitMode: String, Codable, CaseIterable, Identifiable {
         case auto

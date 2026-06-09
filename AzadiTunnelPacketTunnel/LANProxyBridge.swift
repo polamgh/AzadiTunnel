@@ -1117,7 +1117,7 @@ final class LANProxyBridge: @unchecked Sendable {
                 detail: "id=\(queryId) qname=\(qname) source=system-http reason=\(error.localizedDescription)"
             )
             SharedLogger.shared.logRaw(
-                "SECURE_DNS_BYPASS_DETECTED",
+                "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
                 detail: "reason=system_http_fallback_to_socks_dns qname=\(qname) block_cleartext=false"
             )
             return remapped

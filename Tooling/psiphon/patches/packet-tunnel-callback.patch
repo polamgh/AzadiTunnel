@@ -1,8 +1,34 @@
+diff --git a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/NetworkInterface.m b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/NetworkInterface.m
+index b642dbc1..f0bf8ac9 100644
+--- a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/NetworkInterface.m
++++ b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/NetworkInterface.m
+@@ -22,7 +22,7 @@
+ #import <net/if.h>
+ #import <ifaddrs.h>
+ #import <netdb.h>
+-#import <netinet6/in6.h>
++#import <netinet/in.h>
+ #import <Network/path.h>
+ #import <Network/path_monitor.h>
+ #import "DefaultRouteMonitor.h"
+diff --git a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/Reachability/DefaultRouteMonitor.m b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/Reachability/DefaultRouteMonitor.m
+index 89088400..5e72126e 100644
+--- a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/Reachability/DefaultRouteMonitor.m
++++ b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/Network/Reachability/DefaultRouteMonitor.m
+@@ -22,7 +22,7 @@
+ #import <net/if.h>
+ #import <ifaddrs.h>
+ #import <netinet/in.h>
+-#import <netinet6/in6.h>
++#import <netinet/in.h>
+ 
+ @interface NetworkPathState ()
+ /// See comment in DefaultRouteMonitor.h
 diff --git a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
-index 45d7ae3e..fe09c582 100644
+index 45d7ae3e..7c398eb0 100644
 --- a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
 +++ b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
-@@ -63,6 +63,22 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
+@@ -63,6 +63,27 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
  
  @end
  
@@ -15,17 +41,22 @@ index 45d7ae3e..fe09c582 100644
 + */
 +@protocol PsiphonPacketTunnelProvider <NSObject>
 +
++- (long)packetTunnelMTU;
 +- (NSData * _Nullable)readPacket:(NSError * _Nullable * _Nullable)error;
 +- (BOOL)writePacket:(NSData * _Nonnull)packet
 +              error:(NSError * _Nullable * _Nullable)error;
 +- (void)closePacketTunnel;
++- (void)packetTunnelTransportState:(NSString * _Nonnull)state;
++- (void)packetTunnelDiagnostic:(NSString * _Nonnull)stage
++                   packetCount:(int64_t)packetCount
++                     byteCount:(int64_t)byteCount;
 +
 +@end
 +
  /*!
   @protocol TunneledAppDelegate
   Used to communicate with the application that is using the PsiphonTunnel framework,
-@@ -343,6 +359,13 @@ followed by a tunnel-core shutdown.
+@@ -343,6 +364,13 @@ followed by a tunnel-core shutdown.
   */
  @interface PsiphonTunnel : NSObject
  
@@ -135,10 +166,18 @@ index 1512d250..f58d4b9e 100644
      // Optional fields not being altered. If not set, their defaults will be used:
      // * LocalSocksProxyPort
 diff --git a/MobileLibrary/psi/psi.go b/MobileLibrary/psi/psi.go
-index af289ded..c0391b53 100644
+index af289ded..d59af068 100644
 --- a/MobileLibrary/psi/psi.go
 +++ b/MobileLibrary/psi/psi.go
-@@ -73,6 +73,35 @@ type PsiphonProvider interface {
+@@ -32,6 +32,7 @@ import (
+ 	"runtime/debug"
+ 	"strings"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon"
+ 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/common"
+@@ -73,6 +74,134 @@ type PsiphonProvider interface {
  	GetDNSServersAsString() string
  }
  
@@ -148,22 +187,107 @@ index af289ded..c0391b53 100644
 +// block until the host packet flow provides a packet, and ClosePacketTunnel
 +// must interrupt blocked calls.
 +type PsiphonPacketTunnelProvider interface {
++	PacketTunnelMTU() int
 +	ReadPacket() ([]byte, error)
 +	WritePacket(packet []byte) error
 +	ClosePacketTunnel()
++	PacketTunnelTransportState(state string)
++	PacketTunnelDiagnostic(stage string, packetCount int64, byteCount int64)
 +}
 +
 +type packetTunnelDevice struct {
-+	provider  PsiphonPacketTunnelProvider
-+	closeOnce sync.Once
++	provider    PsiphonPacketTunnelProvider
++	mtu         int
++	diagnostics *packetTunnelDiagnostics
++	closeOnce   sync.Once
++}
++
++type packetTunnelDiagnosticCounter struct {
++	packets atomic.Int64
++	bytes   atomic.Int64
++}
++
++type packetTunnelDiagnostics struct {
++	provider                  PsiphonPacketTunnelProvider
++	goCallbackRead            packetTunnelDiagnosticCounter
++	goCallbackWrite           packetTunnelDiagnosticCounter
++	goUpstreamValidated       packetTunnelDiagnosticCounter
++	goUpstreamEnqueued        packetTunnelDiagnosticCounter
++	goUpstreamQueueDrop       packetTunnelDiagnosticCounter
++	goTransportUpstreamWrite  packetTunnelDiagnosticCounter
++	goTransportWriteDrop      packetTunnelDiagnosticCounter
++	goTransportDownstreamRead packetTunnelDiagnosticCounter
++	goDownstreamValidated     packetTunnelDiagnosticCounter
++	goDownstreamDelivered     packetTunnelDiagnosticCounter
++}
++
++func newPacketTunnelDiagnostics(provider PsiphonPacketTunnelProvider) *packetTunnelDiagnostics {
++	return &packetTunnelDiagnostics{
++		provider: provider,
++	}
++}
++
++func (diagnostics *packetTunnelDiagnostics) record(stage string, packetCount, byteCount int64) {
++	var counter *packetTunnelDiagnosticCounter
++	switch stage {
++	case "go_callback_read":
++		counter = &diagnostics.goCallbackRead
++	case "go_callback_write":
++		counter = &diagnostics.goCallbackWrite
++	case "go_upstream_validated":
++		counter = &diagnostics.goUpstreamValidated
++	case "go_upstream_enqueued":
++		counter = &diagnostics.goUpstreamEnqueued
++	case "go_upstream_queue_drop":
++		counter = &diagnostics.goUpstreamQueueDrop
++	case "go_transport_upstream_write":
++		counter = &diagnostics.goTransportUpstreamWrite
++	case "go_transport_write_drop":
++		counter = &diagnostics.goTransportWriteDrop
++	case "go_transport_downstream_read":
++		counter = &diagnostics.goTransportDownstreamRead
++	case "go_downstream_validated":
++		counter = &diagnostics.goDownstreamValidated
++	case "go_downstream_delivered":
++		counter = &diagnostics.goDownstreamDelivered
++	default:
++		return
++	}
++
++	packets := counter.packets.Add(packetCount)
++	bytes := counter.bytes.Add(byteCount)
++	shouldReport := packets == 1 ||
++		(packets > 0 && packets&(packets-1) == 0)
++
++	if shouldReport {
++		diagnostics.provider.PacketTunnelDiagnostic(
++			stage, packets, bytes)
++	}
 +}
 +
 +func (device *packetTunnelDevice) ReadPacket() ([]byte, error) {
-+	return device.provider.ReadPacket()
++	packet, err := device.provider.ReadPacket()
++	if err != nil {
++		return nil, err
++	}
++	if len(packet) > device.mtu {
++		return nil, errors.Tracef(
++			"packet tunnel provider read exceeds MTU: %d > %d", len(packet), device.mtu)
++	}
++	device.diagnostics.record("go_callback_read", 1, int64(len(packet)))
++	return packet, nil
 +}
 +
 +func (device *packetTunnelDevice) WritePacket(packet []byte) error {
-+	return device.provider.WritePacket(packet)
++	if len(packet) > device.mtu {
++		return errors.Tracef(
++			"packet tunnel provider write exceeds MTU: %d > %d", len(packet), device.mtu)
++	}
++	if err := device.provider.WritePacket(packet); err != nil {
++		return err
++	}
++	device.diagnostics.record("go_callback_write", 1, int64(len(packet)))
++	return nil
 +}
 +
 +func (device *packetTunnelDevice) Close() error {
@@ -171,10 +295,24 @@ index af289ded..c0391b53 100644
 +	return nil
 +}
 +
++func (device *packetTunnelDevice) PacketTunnelMTU() int {
++	return device.mtu
++}
++
++func (device *packetTunnelDevice) ReportPacketTunnelState(state string) {
++	device.provider.PacketTunnelTransportState(state)
++}
++
++func (device *packetTunnelDevice) RecordPacketDiagnostic(
++	stage string, packetCount, byteCount int64) {
++
++	device.diagnostics.record(stage, packetCount, byteCount)
++}
++
  type PsiphonProviderFeedbackHandler interface {
  	SendFeedbackCompleted(err error)
  }
-@@ -203,6 +232,55 @@ func Start(
+@@ -203,6 +332,55 @@ func Start(
  	useIPv6Synthesizer bool,
  	useHasIPv6RouteGetter bool) error {
  
@@ -230,13 +368,21 @@ index af289ded..c0391b53 100644
  	controllerMutex.Lock()
  	defer controllerMutex.Unlock()
  
-@@ -230,6 +308,18 @@ func Start(
+@@ -230,6 +408,26 @@ func Start(
  		return errors.Trace(err)
  	}
  
 +	var packetDevice tun.PacketTunnelDevice
 +	if packetProvider != nil {
-+		packetDevice = &packetTunnelDevice{provider: packetProvider}
++		packetTunnelMTU := packetProvider.PacketTunnelMTU()
++		if packetTunnelMTU < 1280 || packetTunnelMTU > 65535 {
++			return errors.Tracef("invalid packet tunnel MTU: %d", packetTunnelMTU)
++		}
++		packetDevice = &packetTunnelDevice{
++			provider:    packetProvider,
++			mtu:         packetTunnelMTU,
++			diagnostics: newPacketTunnelDiagnostics(packetProvider),
++		}
 +		config.PacketTunnelDevice = packetDevice
 +	}
 +	packetControllerStarted := false
@@ -249,7 +395,7 @@ index af289ded..c0391b53 100644
  	// Set up callbacks.
  
  	config.NetworkConnectivityChecker = wrappedProvider
-@@ -316,6 +406,7 @@ func Start(
+@@ -316,6 +514,7 @@ func Start(
  		psiphon.ResetNoticeWriter()
  		return errors.Trace(err)
  	}
@@ -257,88 +403,34 @@ index af289ded..c0391b53 100644
  
  	controllerWaitGroup = new(sync.WaitGroup)
  	controllerWaitGroup.Add(1)
-diff --git a/MobileLibrary/psi/psi_test.go b/MobileLibrary/psi/psi_test.go
-new file mode 100644
-index 00000000..b6eda072
---- /dev/null
-+++ b/MobileLibrary/psi/psi_test.go
-@@ -0,0 +1,71 @@
-+/*
-+ * Copyright (c) 2026, Psiphon Inc.
-+ * All rights reserved.
-+ *
-+ * This program is free software: you can redistribute it and/or modify
-+ * it under the terms of the GNU General Public License as published by
-+ * the Free Software Foundation, either version 3 of the License, or
-+ * (at your option) any later version.
-+ */
-+
-+package psi
-+
-+import (
-+	"errors"
-+	"sync"
-+	"sync/atomic"
-+	"testing"
-+)
-+
-+type testPacketProvider struct {
-+	readError  error
-+	writeError error
-+	closeCount atomic.Int32
-+}
-+
-+func (provider *testPacketProvider) ReadPacket() ([]byte, error) {
-+	return nil, provider.readError
-+}
-+
-+func (provider *testPacketProvider) WritePacket([]byte) error {
-+	return provider.writeError
-+}
-+
-+func (provider *testPacketProvider) ClosePacketTunnel() {
-+	provider.closeCount.Add(1)
-+}
-+
-+func TestPacketTunnelDevicePropagatesIOErrors(t *testing.T) {
-+	readError := errors.New("read failed")
-+	writeError := errors.New("write failed")
-+	provider := &testPacketProvider{readError: readError, writeError: writeError}
-+	device := &packetTunnelDevice{provider: provider}
-+
-+	if _, err := device.ReadPacket(); !errors.Is(err, readError) {
-+		t.Fatalf("ReadPacket error = %v, want %v", err, readError)
-+	}
-+	if err := device.WritePacket([]byte{0x45}); !errors.Is(err, writeError) {
-+		t.Fatalf("WritePacket error = %v, want %v", err, writeError)
-+	}
-+}
-+
-+func TestPacketTunnelDeviceConcurrentCloseCallsProviderOnce(t *testing.T) {
-+	provider := &testPacketProvider{}
-+	device := &packetTunnelDevice{provider: provider}
-+
-+	var waitGroup sync.WaitGroup
-+	waitGroup.Add(32)
-+	for i := 0; i < 32; i++ {
-+		go func() {
-+			defer waitGroup.Done()
-+			if err := device.Close(); err != nil {
-+				t.Errorf("Close failed: %v", err)
-+			}
-+		}()
-+	}
-+	waitGroup.Wait()
-+
-+	if count := provider.closeCount.Load(); count != 1 {
-+		t.Fatalf("ClosePacketTunnel called %d times, want 1", count)
-+	}
-+}
 diff --git a/psiphon/common/tun/tun.go b/psiphon/common/tun/tun.go
-index 11bd201b..62805ab5 100644
+index 11bd201b..9b99bab8 100644
 --- a/psiphon/common/tun/tun.go
 +++ b/psiphon/common/tun/tun.go
-@@ -1804,6 +1804,19 @@ func (queue *PacketQueue) Replace(buffer []byte) {
+@@ -1741,7 +1741,7 @@ func NewPacketQueue(maxSize int) *PacketQueue {
+ // Enqueue adds a packet to the queue.
+ // If the queue is full, the packet is dropped.
+ // Enqueue is _not_ safe for concurrent calls.
+-func (queue *PacketQueue) Enqueue(packet []byte) {
++func (queue *PacketQueue) Enqueue(packet []byte) bool {
+ 
+ 	var buffer []byte
+ 
+@@ -1765,10 +1765,13 @@ func (queue *PacketQueue) Enqueue(packet []byte) {
+ 
+ 		buffer = append(buffer, channelHeader[:]...)
+ 		buffer = append(buffer, packet...)
++		queue.activeBuffer <- buffer
++		return true
+ 	}
+ 	// Else, queue is full, so drop packet.
+ 
+ 	queue.activeBuffer <- buffer
++	return false
+ }
+ 
+ // DequeueFramedPackets waits until at least one packet is
+@@ -1804,6 +1807,28 @@ func (queue *PacketQueue) Replace(buffer []byte) {
  	queue.emptyBuffers <- buffer
  }
  
@@ -355,10 +447,19 @@ index 11bd201b..62805ab5 100644
 +	Close() error
 +}
 +
++// PacketTunnelDeviceReporter is optionally implemented by callback-backed
++// packet devices. It aligns channel framing with the host interface MTU and
++// reports only aggregate packet counts/bytes and transport lifecycle state.
++type PacketTunnelDeviceReporter interface {
++	PacketTunnelMTU() int
++	ReportPacketTunnelState(state string)
++	RecordPacketDiagnostic(stage string, packetCount, byteCount int64)
++}
++
  // ClientConfig specifies the configuration of a packet tunnel client.
  type ClientConfig struct {
  
-@@ -1837,6 +1850,12 @@ type ClientConfig struct {
+@@ -1837,6 +1862,21 @@ type ClientConfig struct {
  	// tunnel server.
  	Transport io.ReadWriteCloser
  
@@ -368,10 +469,27 @@ index 11bd201b..62805ab5 100644
 +	// header. This is intended for public mobile packet-flow APIs.
 +	PacketDevice PacketTunnelDevice
 +
++	// PacketDeviceFailure is called once when a callback-backed packet device
++	// returns a terminal read or write error. File-descriptor TUN errors retain
++	// their historical retry behavior.
++	PacketDeviceFailure func(error)
++
++	// PacketDiagnostic reports aggregate packet deltas. No packet contents or
++	// endpoint metadata are passed to this callback.
++	PacketDiagnostic func(stage string, packetCount, byteCount int64)
++
  	// TunFileDescriptor specifies a file descriptor to use to
  	// read and write packets to be relayed to the client. When
  	// TunFileDescriptor is specified, the Client will use this
-@@ -1935,7 +1954,9 @@ func NewClient(config *ClientConfig) (*Client, error) {
+@@ -1890,6 +1930,7 @@ type Client struct {
+ 	runContext      context.Context
+ 	stopRunning     context.CancelFunc
+ 	workers         *sync.WaitGroup
++	packetFailure   sync.Once
+ }
+ 
+ // clientTransparentDNS caches the parsed representions of
+@@ -1935,7 +1976,9 @@ func NewClient(config *ClientConfig) (*Client, error) {
  	var device *Device
  	var err error
  
@@ -382,7 +500,134 @@ index 11bd201b..62805ab5 100644
  		device, err = NewClientDeviceFromFD(config)
  	} else {
  		device, err = NewClientDevice(config)
-@@ -2970,6 +2991,7 @@ type Device struct {
+@@ -1993,6 +2036,10 @@ func (client *Client) Start() {
+ 			if err != nil {
+ 				client.config.Logger.WithTraceFields(
+ 					common.LogFields{"error": err}).Info("read device packet failed")
++				if client.config.PacketDevice != nil {
++					client.failPacketDevice(err)
++					return
++				}
+ 				// May be temporary error condition, keep working.
+ 				continue
+ 			}
+@@ -2011,6 +2058,7 @@ func (client *Client) Start() {
+ 				readPacket) {
+ 				continue
+ 			}
++			client.reportPacketDiagnostic("go_upstream_validated", 1, int64(len(readPacket)))
+ 
+ 			// Instead of immediately writing to the channel, the
+ 			// packet is enqueued, which has the effect of batching
+@@ -2019,7 +2067,11 @@ func (client *Client) Start() {
+ 			// improve throughput.
+ 			// Packet will be dropped if queue is full.
+ 
+-			client.upstreamPackets.Enqueue(readPacket)
++			if client.upstreamPackets.Enqueue(readPacket) {
++				client.reportPacketDiagnostic("go_upstream_enqueued", 1, int64(len(readPacket)))
++			} else {
++				client.reportPacketDiagnostic("go_upstream_queue_drop", 1, int64(len(readPacket)))
++			}
+ 		}
+ 	}()
+ 
+@@ -2034,16 +2086,21 @@ func (client *Client) Start() {
+ 			}
+ 
+ 			err := client.channel.WriteFramedPackets(packetBuffer)
++			packetCount, byteCount := countFramedPackets(packetBuffer)
+ 
+ 			client.upstreamPackets.Replace(packetBuffer)
+ 
+ 			if err != nil {
++				client.reportPacketDiagnostic(
++					"go_transport_write_drop", packetCount, byteCount)
+ 				client.config.Logger.WithTraceFields(
+ 					common.LogFields{"error": err}).Info("write channel packets failed")
+ 				// May be temporary error condition, such as reconnecting the tunnel;
+ 				// keep working. The packets are most likely dropped.
+ 				continue
+ 			}
++			client.reportPacketDiagnostic(
++				"go_transport_upstream_write", packetCount, byteCount)
+ 		}
+ 	}()
+ 
+@@ -2067,6 +2124,8 @@ func (client *Client) Start() {
+ 				// keep working.
+ 				continue
+ 			}
++			client.reportPacketDiagnostic(
++				"go_transport_downstream_read", 1, int64(len(readPacket)))
+ 
+ 			if !processPacket(
+ 				client.metrics,
+@@ -2076,20 +2135,63 @@ func (client *Client) Start() {
+ 				readPacket) {
+ 				continue
+ 			}
++			client.reportPacketDiagnostic(
++				"go_downstream_validated", 1, int64(len(readPacket)))
+ 
+ 			err = client.device.WritePacket(readPacket)
+ 
+ 			if err != nil {
++				select {
++				case <-client.runContext.Done():
++					return
++				default:
++				}
+ 				client.config.Logger.WithTraceFields(
+ 					common.LogFields{"error": err}).Info("write device packet failed")
++				if client.config.PacketDevice != nil {
++					client.failPacketDevice(err)
++					return
++				}
+ 				// May be temporary error condition, keep working. The packet is
+ 				// most likely dropped.
+ 				continue
+ 			}
++			client.reportPacketDiagnostic(
++				"go_downstream_delivered", 1, int64(len(readPacket)))
+ 		}
+ 	}()
+ }
+ 
++func (client *Client) failPacketDevice(err error) {
++	client.packetFailure.Do(func() {
++		if client.config.PacketDeviceFailure != nil {
++			client.config.PacketDeviceFailure(err)
++		}
++	})
++}
++
++func (client *Client) reportPacketDiagnostic(stage string, packetCount, byteCount int64) {
++	if client.config.PacketDiagnostic != nil && packetCount > 0 {
++		client.config.PacketDiagnostic(stage, packetCount, byteCount)
++	}
++}
++
++func countFramedPackets(packetBuffer []byte) (int64, int64) {
++	var packetCount int64
++	var byteCount int64
++	for offset := 0; offset+channelHeaderSize <= len(packetBuffer); {
++		size := int(binary.BigEndian.Uint16(packetBuffer[offset : offset+channelHeaderSize]))
++		offset += channelHeaderSize
++		if size < 0 || offset+size > len(packetBuffer) {
++			break
++		}
++		packetCount++
++		byteCount += int64(size)
++		offset += size
++	}
++	return packetCount, byteCount
++}
++
+ // Stop halts a running client.
+ func (client *Client) Stop() {
+ 
+@@ -2970,6 +3072,7 @@ type Device struct {
  	name           string
  	writeMutex     sync.Mutex
  	deviceIO       io.ReadWriteCloser
@@ -390,7 +635,7 @@ index 11bd201b..62805ab5 100644
  	inboundBuffer  []byte
  	outboundBuffer []byte
  }
-@@ -3049,6 +3071,24 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
+@@ -3049,6 +3152,24 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
  	}, nil
  }
  
@@ -415,7 +660,7 @@ index 11bd201b..62805ab5 100644
  // Name returns the interface name for a created tun device,
  // or returns "" for a device created by NewClientDeviceFromFD.
  // The interface name may be used for additional network and
-@@ -3062,6 +3102,16 @@ func (device *Device) Name() string {
+@@ -3062,6 +3183,16 @@ func (device *Device) Name() string {
  // value is only valid until the next ReadPacket call.
  // Concurrent calls to ReadPacket are _not_ supported.
  func (device *Device) ReadPacket() ([]byte, error) {
@@ -432,7 +677,7 @@ index 11bd201b..62805ab5 100644
  
  	// readTunPacket performs the platform dependent
  	// packet read operation.
-@@ -3082,6 +3132,13 @@ func (device *Device) WritePacket(packet []byte) error {
+@@ -3082,6 +3213,13 @@ func (device *Device) WritePacket(packet []byte) error {
  	device.writeMutex.Lock()
  	defer device.writeMutex.Unlock()
  
@@ -446,7 +691,7 @@ index 11bd201b..62805ab5 100644
  	// writeTunPacket performs the platform dependent
  	// packet write operation.
  	err := device.writeTunPacket(packet)
-@@ -3095,6 +3152,9 @@ func (device *Device) WritePacket(packet []byte) error {
+@@ -3095,6 +3233,9 @@ func (device *Device) WritePacket(packet []byte) error {
  // Close interrupts any blocking Read/Write calls and
  // tears down the tun device.
  func (device *Device) Close() error {
@@ -457,7 +702,7 @@ index 11bd201b..62805ab5 100644
  }
  
 diff --git a/psiphon/common/tun/tun_test.go b/psiphon/common/tun/tun_test.go
-index 082012bf..fa331b47 100644
+index 082012bf..1836aadd 100644
 --- a/psiphon/common/tun/tun_test.go
 +++ b/psiphon/common/tun/tun_test.go
 @@ -31,6 +31,7 @@ import (
@@ -468,7 +713,7 @@ index 082012bf..fa331b47 100644
  	"sync"
  	"sync/atomic"
  	"syscall"
-@@ -53,6 +54,169 @@ const (
+@@ -53,6 +54,232 @@ const (
  	PACKET_METRICS_TIMEOUT  = 10 * time.Second
  )
  
@@ -481,6 +726,22 @@ index 082012bf..fa331b47 100644
 +type blockingPacketTunnelDevice struct {
 +	closed    chan struct{}
 +	closeOnce sync.Once
++}
++
++type failingPacketTunnelDevice struct {
++	readError error
++	closed    atomic.Bool
++}
++
++func (device *failingPacketTunnelDevice) ReadPacket() ([]byte, error) {
++	return nil, device.readError
++}
++
++func (device *failingPacketTunnelDevice) WritePacket([]byte) error { return nil }
++
++func (device *failingPacketTunnelDevice) Close() error {
++	device.closed.Store(true)
++	return nil
 +}
 +
 +func newBlockingPacketTunnelDevice() *blockingPacketTunnelDevice {
@@ -635,6 +896,53 @@ index 082012bf..fa331b47 100644
 +	waitGroup.Wait()
 +}
 +
++func TestClientPacketDeviceFailureIsTerminalAndReportedOnce(t *testing.T) {
++	readError := errors.New("callback device failed")
++	packetDevice := &failingPacketTunnelDevice{readError: readError}
++	transport := newBlockingPacketTunnelTransport()
++	failureCount := atomic.Int32{}
++	failureReported := make(chan error, 1)
++	client, err := NewClient(&ClientConfig{
++		Logger:       testutils.NewTestLogger(),
++		PacketDevice: packetDevice,
++		Transport:    transport,
++		PacketDeviceFailure: func(err error) {
++			failureCount.Add(1)
++			failureReported <- err
++		},
++	})
++	if err != nil {
++		t.Fatalf("NewClient failed: %v", err)
++	}
++	client.Start()
++
++	select {
++	case reportedError := <-failureReported:
++		if !errors.Is(reportedError, readError) {
++			t.Fatalf("failure error = %v, want %v", reportedError, readError)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("packet device failure was not reported")
++	}
++
++	time.Sleep(20 * time.Millisecond)
++	if count := failureCount.Load(); count != 1 {
++		t.Fatalf("failure callback count = %d, want 1", count)
++	}
++	client.Stop()
++	if !packetDevice.closed.Load() {
++		t.Fatal("Stop did not close failed packet device")
++	}
++}
++
++func TestCountFramedPackets(t *testing.T) {
++	buffer := []byte{0, 3, 1, 2, 3, 0, 2, 4, 5}
++	packets, bytes := countFramedPackets(buffer)
++	if packets != 2 || bytes != 5 {
++		t.Fatalf("countFramedPackets = (%d, %d), want (2, 5)", packets, bytes)
++	}
++}
++
  func TestTunneledTCPIPv4(t *testing.T) {
  	testTunneledTCP(t, false)
  }
@@ -664,7 +972,7 @@ index 1797eee2..1805da1b 100644
  	}
  
 diff --git a/psiphon/controller.go b/psiphon/controller.go
-index 948488b4..f726bd1e 100644
+index 948488b4..ea0d4003 100644
 --- a/psiphon/controller.go
 +++ b/psiphon/controller.go
 @@ -249,7 +249,7 @@ func NewController(config *Config) (controller *Controller, err error) {
@@ -676,15 +984,41 @@ index 948488b4..f726bd1e 100644
  
  		// Run a packet tunnel client. The lifetime of the tun.Client is the
  		// lifetime of the Controller, so it exists across tunnel establishments
-@@ -262,6 +262,7 @@ func NewController(config *Config) (controller *Controller, err error) {
+@@ -257,11 +257,30 @@ func NewController(config *Config) (controller *Controller, err error) {
+ 		// that presents a continuosuly existing transport to the tun.Client;
+ 		// it's set to use new SSH channels after new SSH tunnel establishes.
+ 
+-		packetTunnelTransport := NewPacketTunnelTransport()
++		var packetTunnelMTU int
++		var packetTunnelStateReporter func(string)
++		var packetTunnelDiagnostic func(string, int64, int64)
++		if reporter, ok := config.PacketTunnelDevice.(tun.PacketTunnelDeviceReporter); ok {
++			packetTunnelMTU = reporter.PacketTunnelMTU()
++			packetTunnelStateReporter = reporter.ReportPacketTunnelState
++			packetTunnelDiagnostic = reporter.RecordPacketDiagnostic
++		}
++
++		packetTunnelTransport := NewPacketTunnelTransport(packetTunnelStateReporter)
+ 
  		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
- 			Logger:                    NoticeCommonLogger(false),
- 			TunFileDescriptor:         config.PacketTunnelTunFileDescriptor,
-+			PacketDevice:              config.PacketTunnelDevice,
+-			Logger:                    NoticeCommonLogger(false),
+-			TunFileDescriptor:         config.PacketTunnelTunFileDescriptor,
++			Logger:            NoticeCommonLogger(false),
++			MTU:               packetTunnelMTU,
++			TunFileDescriptor: config.PacketTunnelTunFileDescriptor,
++			PacketDevice:      config.PacketTunnelDevice,
++			PacketDeviceFailure: func(err error) {
++				NoticeWarning("packet tunnel callback device failed")
++				if packetTunnelStateReporter != nil {
++					packetTunnelStateReporter("device_failed")
++				}
++				controller.SignalComponentFailure()
++			},
++			PacketDiagnostic:          packetTunnelDiagnostic,
  			TransparentDNSIPv4Address: config.PacketTunnelTransparentDNSIPv4Address,
  			TransparentDNSIPv6Address: config.PacketTunnelTransparentDNSIPv6Address,
  			Transport:                 packetTunnelTransport,
-@@ -2886,6 +2887,7 @@ func (controller *Controller) launchEstablishing() {
+@@ -2886,6 +2905,7 @@ func (controller *Controller) launchEstablishing() {
  
  	tunnelPoolSize := p.Int(parameters.TunnelPoolSize)
  	if controller.config.PacketTunnelTunFileDescriptor > 0 ||
@@ -692,4 +1026,306 @@ index 948488b4..f726bd1e 100644
  		controller.config.TargetServerEntry != "" {
  		tunnelPoolSize = 1
  	}
+diff --git a/psiphon/packetTunnelTransport.go b/psiphon/packetTunnelTransport.go
+index 8471766e..09045adb 100755
+--- a/psiphon/packetTunnelTransport.go
++++ b/psiphon/packetTunnelTransport.go
+@@ -45,13 +45,15 @@ type PacketTunnelTransport struct {
+ 	channelMutex  sync.Mutex
+ 	channelConn   net.Conn
+ 	channelTunnel *Tunnel
++	reportState   func(string)
+ }
+ 
+ // NewPacketTunnelTransport initializes a PacketTunnelTransport.
+-func NewPacketTunnelTransport() *PacketTunnelTransport {
++func NewPacketTunnelTransport(reportState func(string)) *PacketTunnelTransport {
+ 	return &PacketTunnelTransport{
+ 		workers:      new(sync.WaitGroup),
+ 		channelReady: sync.NewCond(new(sync.Mutex)),
++		reportState:  reportState,
+ 	}
+ }
+ 
+@@ -194,6 +196,7 @@ func (p *PacketTunnelTransport) Close() error {
+ 		p.channelConn = nil
+ 	}
+ 	p.channelMutex.Unlock()
++	p.notifyState("closed")
+ 
+ 	return nil
+ }
+@@ -232,6 +235,7 @@ func (p *PacketTunnelTransport) UseTunnel(tunnel *Tunnel) {
+ 			// so it's not necessary to do so here.
+ 
+ 			NoticeWarning("dial packet tunnel channel failed: %s", err)
++			p.notifyUnavailableIfNoChannel()
+ 			// TODO: retry?
+ 			return
+ 		}
+@@ -244,6 +248,13 @@ func (p *PacketTunnelTransport) UseTunnel(tunnel *Tunnel) {
+ func (p *PacketTunnelTransport) setChannel(
+ 	channelConn net.Conn, channelTunnel *Tunnel) {
+ 
++	// Initialize the read deadline mechanism using parameters associated with the
++	// new tunnel before publishing the channel to blocked readers and writers.
++	timeout := channelTunnel.config.
++		GetParameters().
++		GetCustom(channelTunnel.dialParams.NetworkLatencyMultiplier).
++		Duration(parameters.PacketTunnelReadTimeout)
++
+ 	p.channelMutex.Lock()
+ 
+ 	// Concurrency note: this check is within the mutex to ensure that a
+@@ -251,6 +262,7 @@ func (p *PacketTunnelTransport) setChannel(
+ 	// set.
+ 	if atomic.LoadInt32(&p.closed) == 1 {
+ 		p.channelMutex.Unlock()
++		channelConn.Close()
+ 		return
+ 	}
+ 
+@@ -261,17 +273,12 @@ func (p *PacketTunnelTransport) setChannel(
+ 
+ 	p.channelConn = channelConn
+ 	p.channelTunnel = channelTunnel
+-
+-	p.channelMutex.Unlock()
+-
+-	// Initialize the read deadline mechanism using parameters associated with the
+-	// new tunnel.
+-	timeout := channelTunnel.config.
+-		GetParameters().
+-		GetCustom(channelTunnel.dialParams.NetworkLatencyMultiplier).
+-		Duration(parameters.PacketTunnelReadTimeout)
+ 	p.readTimeout.Store(int64(timeout))
+ 	p.readDeadline.Store(0)
++	// Serialize state callbacks with channel replacement so a stale "ready"
++	// cannot arrive after a concurrent "reconnecting" notification.
++	p.notifyState("ready")
++	p.channelMutex.Unlock()
+ 
+ 	p.channelReady.Broadcast()
+ }
+@@ -325,6 +332,7 @@ func (p *PacketTunnelTransport) failedChannel(
+ 		p.channelConn.Close()
+ 		p.channelConn = nil
+ 		p.channelTunnel = nil
++		p.notifyState("reconnecting")
+ 	}
+ 	p.channelMutex.Unlock()
+ 
+@@ -337,3 +345,17 @@ func (p *PacketTunnelTransport) failedChannel(
+ 
+ 	p.UseTunnel(channelTunnel)
+ }
++
++func (p *PacketTunnelTransport) notifyUnavailableIfNoChannel() {
++	p.channelMutex.Lock()
++	defer p.channelMutex.Unlock()
++	if p.channelConn == nil && atomic.LoadInt32(&p.closed) == 0 {
++		p.notifyState("unavailable")
++	}
++}
++
++func (p *PacketTunnelTransport) notifyState(state string) {
++	if p.reportState != nil {
++		p.reportState(state)
++	}
++}
+diff --git a/MobileLibrary/psi/psi_test.go b/MobileLibrary/psi/psi_test.go
+new file mode 100644
+index 00000000..4bd6d3b6
+--- /dev/null
++++ b/MobileLibrary/psi/psi_test.go
+@@ -0,0 +1,189 @@
++/*
++ * Copyright (c) 2026, Psiphon Inc.
++ * All rights reserved.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ */
++
++package psi
++
++import (
++	"errors"
++	"sync"
++	"sync/atomic"
++	"testing"
++)
++
++type testPacketProvider struct {
++	readPacket  []byte
++	readError   error
++	writeError  error
++	closeCount  atomic.Int32
++	mutex       sync.Mutex
++	states      []string
++	diagnostics []testPacketTunnelDiagnostic
++}
++
++type testPacketTunnelDiagnostic struct {
++	stage   string
++	packets int64
++	bytes   int64
++}
++
++func (provider *testPacketProvider) PacketTunnelMTU() int { return 1500 }
++
++func (provider *testPacketProvider) ReadPacket() ([]byte, error) {
++	return provider.readPacket, provider.readError
++}
++
++func (provider *testPacketProvider) WritePacket([]byte) error {
++	return provider.writeError
++}
++
++func (provider *testPacketProvider) ClosePacketTunnel() {
++	provider.closeCount.Add(1)
++}
++
++func (provider *testPacketProvider) PacketTunnelTransportState(state string) {
++	provider.mutex.Lock()
++	provider.states = append(provider.states, state)
++	provider.mutex.Unlock()
++}
++
++func (provider *testPacketProvider) PacketTunnelDiagnostic(
++	stage string, packetCount int64, byteCount int64) {
++
++	provider.mutex.Lock()
++	provider.diagnostics = append(provider.diagnostics, testPacketTunnelDiagnostic{
++		stage:   stage,
++		packets: packetCount,
++		bytes:   byteCount,
++	})
++	provider.mutex.Unlock()
++}
++
++func newTestPacketTunnelDevice(provider *testPacketProvider) *packetTunnelDevice {
++	return &packetTunnelDevice{
++		provider:    provider,
++		mtu:         provider.PacketTunnelMTU(),
++		diagnostics: newPacketTunnelDiagnostics(provider),
++	}
++}
++
++func TestPacketTunnelDevicePropagatesIOErrors(t *testing.T) {
++	readError := errors.New("read failed")
++	writeError := errors.New("write failed")
++	provider := &testPacketProvider{readError: readError, writeError: writeError}
++	device := newTestPacketTunnelDevice(provider)
++
++	if _, err := device.ReadPacket(); !errors.Is(err, readError) {
++		t.Fatalf("ReadPacket error = %v, want %v", err, readError)
++	}
++	if err := device.WritePacket([]byte{0x45}); !errors.Is(err, writeError) {
++		t.Fatalf("WritePacket error = %v, want %v", err, writeError)
++	}
++}
++
++func TestPacketTunnelDeviceConcurrentCloseCallsProviderOnce(t *testing.T) {
++	provider := &testPacketProvider{}
++	device := newTestPacketTunnelDevice(provider)
++
++	var waitGroup sync.WaitGroup
++	waitGroup.Add(32)
++	for i := 0; i < 32; i++ {
++		go func() {
++			defer waitGroup.Done()
++			if err := device.Close(); err != nil {
++				t.Errorf("Close failed: %v", err)
++			}
++		}()
++	}
++	waitGroup.Wait()
++
++	if count := provider.closeCount.Load(); count != 1 {
++		t.Fatalf("ClosePacketTunnel called %d times, want 1", count)
++	}
++}
++
++func TestPacketTunnelDeviceReportsPowerOfTwoCountersAndMTU(t *testing.T) {
++	packet := make([]byte, 1280)
++	packet[0] = 0x60
++	provider := &testPacketProvider{readPacket: packet}
++	device := newTestPacketTunnelDevice(provider)
++
++	for i := 0; i < 4; i++ {
++		if _, err := device.ReadPacket(); err != nil {
++			t.Fatalf("ReadPacket failed: %v", err)
++		}
++		if err := device.WritePacket(packet); err != nil {
++			t.Fatalf("WritePacket failed: %v", err)
++		}
++	}
++
++	provider.mutex.Lock()
++	defer provider.mutex.Unlock()
++	if len(provider.diagnostics) != 6 {
++		t.Fatalf("diagnostic callback count = %d, want 6", len(provider.diagnostics))
++	}
++	wantCounts := []int64{1, 1, 2, 2, 4, 4}
++	wantStages := []string{
++		"go_callback_read", "go_callback_write",
++		"go_callback_read", "go_callback_write",
++		"go_callback_read", "go_callback_write",
++	}
++	for index, diagnostic := range provider.diagnostics {
++		if diagnostic.packets != wantCounts[index] {
++			t.Fatalf("diagnostic %d packets = %d, want %d", index, diagnostic.packets, wantCounts[index])
++		}
++		if diagnostic.stage != wantStages[index] {
++			t.Fatalf("diagnostic %d stage = %q, want %q", index, diagnostic.stage, wantStages[index])
++		}
++	}
++	if device.PacketTunnelMTU() != 1500 {
++		t.Fatalf("PacketTunnelMTU = %d, want 1500", device.PacketTunnelMTU())
++	}
++}
++
++func TestPacketTunnelDeviceRejectsPacketsAboveMTU(t *testing.T) {
++	provider := &testPacketProvider{readPacket: make([]byte, 1501)}
++	device := newTestPacketTunnelDevice(provider)
++
++	if _, err := device.ReadPacket(); err == nil {
++		t.Fatal("ReadPacket accepted an oversized packet")
++	}
++	if err := device.WritePacket(make([]byte, 1501)); err == nil {
++		t.Fatal("WritePacket accepted an oversized packet")
++	}
++}
++
++func TestPacketTunnelDeviceReportsExplicitDropCounters(t *testing.T) {
++	provider := &testPacketProvider{}
++	device := newTestPacketTunnelDevice(provider)
++
++	for i := 0; i < 4; i++ {
++		device.RecordPacketDiagnostic("go_upstream_queue_drop", 1, 100)
++		device.RecordPacketDiagnostic("go_transport_write_drop", 2, 200)
++	}
++
++	provider.mutex.Lock()
++	defer provider.mutex.Unlock()
++	wantStages := []string{
++		"go_upstream_queue_drop", "go_transport_write_drop",
++		"go_upstream_queue_drop", "go_transport_write_drop",
++		"go_upstream_queue_drop", "go_transport_write_drop",
++	}
++	wantCounts := []int64{1, 2, 2, 4, 4, 8}
++	if len(provider.diagnostics) != len(wantStages) {
++		t.Fatalf("diagnostic callback count = %d, want %d", len(provider.diagnostics), len(wantStages))
++	}
++	for index, diagnostic := range provider.diagnostics {
++		if diagnostic.stage != wantStages[index] || diagnostic.packets != wantCounts[index] {
++			t.Fatalf(
++				"diagnostic %d = (%q, %d), want (%q, %d)",
++				index, diagnostic.stage, diagnostic.packets, wantStages[index], wantCounts[index])
++		}
++	}
++}
 

@@ -22,6 +22,9 @@ fi
 
 git -C "${SRC_DIR}" fetch --depth 1 origin "${PINNED}" 2>/dev/null || git -C "${SRC_DIR}" fetch origin
 git -C "${SRC_DIR}" checkout -f "${PINNED}"
+# The callback patch adds this generated-source test file. Remove only that
+# known untracked artifact so repeated framework builds remain idempotent.
+git -C "${SRC_DIR}" clean -f -- MobileLibrary/psi/psi_test.go >/dev/null
 
 if ! git -C "${SRC_DIR}" apply --check "${PACKET_TUNNEL_PATCH}"; then
   echo "Pinned Psiphon source does not match packet tunnel callback patch"
@@ -31,10 +34,16 @@ git -C "${SRC_DIR}" apply "${PACKET_TUNNEL_PATCH}"
 echo "Applied public packet tunnel callback adaptation"
 
 # Xcode 26+ SDK: netinet6/in6.h is no longer a public module header.
-grep -rl 'netinet6/in6.h' "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel" 2>/dev/null | while read -r f; do
+# A no-match result is valid when the pinned source or patch already uses the
+# public header, so it must not terminate this `set -euo pipefail` script.
+while read -r f; do
   sed -i '' 's/#import <netinet6\/in6.h>/#import <netinet\/in.h>/' "${f}"
-done
+done < <(grep -rl 'netinet6/in6.h' "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel" 2>/dev/null || true)
 
+SYSTEM_GO="$(command -v go || true)"
+if [[ -z "${GOROOT:-}" && -n "${SYSTEM_GO}" ]]; then
+  export GOROOT="$("${SYSTEM_GO}" env GOROOT)"
+fi
 if [[ -n "${GOROOT:-}" && -x "${GOROOT}/bin/go" ]]; then
   export PATH="${GOROOT}/bin:${PATH}"
 fi

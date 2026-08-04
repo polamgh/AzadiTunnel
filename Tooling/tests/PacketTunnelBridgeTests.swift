@@ -8,6 +8,7 @@ struct PacketTunnelBridgeTests {
         testOverflowAndCloseBoundary()
         testCloseUnblocksRead()
         testIPv4IPv6ProtocolValues()
+        testPacketTransportReadiness()
         print("packet tunnel bridge tests: ok")
     }
 
@@ -102,5 +103,36 @@ struct PacketTunnelBridgeTests {
         ipv6UDP[0] = 0x60
         ipv6UDP[6] = 17
         require(PsiphonPacketTunnelCapabilities.kind(of: ipv6UDP) == .ipv6UDP, "IPv6 UDP classification")
+    }
+
+    private static func testPacketTransportReadiness() {
+        require(!PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: true,
+            hasPacketProvider: true,
+            packetTransportReady: false,
+            hasSocks: true,
+            coreConnected: true
+        ), "SOCKS must not mask an unavailable packet transport")
+        require(PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: true,
+            hasPacketProvider: true,
+            packetTransportReady: true,
+            hasSocks: true,
+            coreConnected: true
+        ), "native packet transport and secure DNS readiness")
+        require(!PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: true,
+            hasPacketProvider: true,
+            packetTransportReady: true,
+            hasSocks: false,
+            coreConnected: true
+        ), "mandatory in-tunnel DNS requires SOCKS readiness")
+        require(!PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: true,
+            hasPacketProvider: true,
+            packetTransportReady: true,
+            hasSocks: true,
+            coreConnected: false
+        ), "core connection is required")
     }
 }

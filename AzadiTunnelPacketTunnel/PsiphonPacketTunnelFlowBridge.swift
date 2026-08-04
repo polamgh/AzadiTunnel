@@ -10,15 +10,18 @@ final class PsiphonPacketTunnelFlowBridge: PsiphonPacketTunnelIO, @unchecked Sen
 
     private static let queueLimit = 4096
     private let packetFlow: NEPacketTunnelFlow
+    let mtu: Int
     private let packetQueue = PsiphonPacketTunnelPacketQueue(capacity: queueLimit)
     private let stateLock = NSLock()
     private var started = false
     private var readLoopStarted = false
     private var dnsHandler: DNSHandler?
     private var failureHandler: ((NSError) -> Void)?
+    private var diagnosticCounters: [String: (packets: UInt64, bytes: UInt64)] = [:]
 
-    init(packetFlow: NEPacketTunnelFlow) {
+    init(packetFlow: NEPacketTunnelFlow, mtu: Int) {
         self.packetFlow = packetFlow
+        self.mtu = mtu
     }
 
     func setDNSHandler(_ handler: DNSHandler?) {
@@ -50,6 +53,7 @@ final class PsiphonPacketTunnelFlowBridge: PsiphonPacketTunnelIO, @unchecked Sen
 
     func readPacket() throws -> Data {
         let packet = try packetQueue.dequeue()
+        recordDiagnostic(stage: "swift_callback_read", bytes: packet.count)
         TunnelStatisticsStore.recordPacketBytes(down: 0, up: packet.count)
         return packet
     }
@@ -62,12 +66,20 @@ final class PsiphonPacketTunnelFlowBridge: PsiphonPacketTunnelIO, @unchecked Sen
             throw error
         }
 
+        stateLock.lock()
         if packetQueue.isClosed {
-            throw packetQueue.error ?? Self.error(code: 3, reason: "packet_tunnel_closed")
+            let error = packetQueue.error ?? Self.error(code: 3, reason: "packet_tunnel_closed")
+            stateLock.unlock()
+            throw error
         }
-
         packetFlow.writePackets([packet], withProtocols: [protocolNumber])
+        stateLock.unlock()
+        recordDiagnostic(stage: "ne_flow_write_submitted", bytes: packet.count)
         TunnelStatisticsStore.recordPacketBytes(down: packet.count, up: 0)
+    }
+
+    func failPacketTunnel(_ error: NSError) {
+        fail(error)
     }
 
     func close() {
@@ -97,6 +109,7 @@ final class PsiphonPacketTunnelFlowBridge: PsiphonPacketTunnelIO, @unchecked Sen
                 return
             }
             let protocolNumber = inferredProtocol
+            recordDiagnostic(stage: "ne_flow_read", bytes: packet.count)
 
             stateLock.lock()
             let active = !packetQueue.isClosed
@@ -146,6 +159,25 @@ final class PsiphonPacketTunnelFlowBridge: PsiphonPacketTunnelIO, @unchecked Sen
             detail: "code=\(error.code) reason=\(error.localizedDescription)"
         )
         handler?(error)
+    }
+
+    /// Emits only cumulative packet/byte counts. The first packet and powers
+    /// of two are logged so device diagnostics stay useful without logging
+    /// packet payloads, protocol metadata, or destinations at line rate.
+    private func recordDiagnostic(stage: String, bytes: Int) {
+        stateLock.lock()
+        var counter = diagnosticCounters[stage] ?? (packets: 0, bytes: 0)
+        counter.packets &+= 1
+        counter.bytes &+= UInt64(bytes)
+        diagnosticCounters[stage] = counter
+        let shouldLog = counter.packets == 1 || counter.packets.nonzeroBitCount == 1
+        stateLock.unlock()
+
+        guard shouldLog else { return }
+        SharedLogger.shared.logRaw(
+            "PSIPHON_PACKET_DATA_PLANE",
+            detail: "stage=\(stage) packets=\(counter.packets) bytes=\(counter.bytes)"
+        )
     }
 
     private static func error(code: Int, reason: String) -> NSError {

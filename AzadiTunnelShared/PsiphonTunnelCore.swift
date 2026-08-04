@@ -32,8 +32,10 @@ protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable, PacketEngineCapabilityP
 /// packet order, surface queue overflow as an error, and unblock reads on
 /// close. Packets are complete IPv4/IPv6 packets with no tun header.
 protocol PsiphonPacketTunnelIO: AnyObject, Sendable {
+    var mtu: Int { get }
     func readPacket() throws -> Data
     func writePacket(_ packet: Data) throws
+    func failPacketTunnel(_ error: NSError)
     func close()
 }
 

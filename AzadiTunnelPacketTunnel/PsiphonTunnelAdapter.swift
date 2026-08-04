@@ -3,10 +3,17 @@ import PsiphonTunnel
 
 private final class PsiphonPacketTunnelProviderAdapter: NSObject, PsiphonPacketTunnelProvider {
     private let io: PsiphonPacketTunnelIO
+    private let transportStateHandler: @Sendable (String) -> Void
 
-    init(io: PsiphonPacketTunnelIO) {
+    init(
+        io: PsiphonPacketTunnelIO,
+        transportStateHandler: @escaping @Sendable (String) -> Void
+    ) {
         self.io = io
+        self.transportStateHandler = transportStateHandler
     }
+
+    func packetTunnelMTU() -> Int { io.mtu }
 
     func readPacket() throws -> Data {
         try io.readPacket()
@@ -18,6 +25,21 @@ private final class PsiphonPacketTunnelProviderAdapter: NSObject, PsiphonPacketT
 
     func closePacketTunnel() {
         io.close()
+    }
+
+    func packetTunnelTransportState(_ state: String) {
+        transportStateHandler(state)
+    }
+
+    func packetTunnelDiagnostic(_ stage: String, packetCount: Int64, byteCount: Int64) {
+        SharedLogger.shared.logRaw(
+            "PSIPHON_PACKET_DATA_PLANE",
+            detail: "stage=\(stage) packets=\(packetCount) bytes=\(byteCount)"
+        )
+    }
+
+    func fail(_ error: NSError) {
+        io.failPacketTunnel(error)
     }
 }
 
@@ -31,6 +53,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     private var activeGeneration: UInt64 = 0
     private var callbacksActive = false
     private var packetMode = false
+    private var packetTransportReady = false
     private var packetProviderAdapter: PsiphonPacketTunnelProviderAdapter?
     private var startTimeoutTask: Task<Void, Never>?
     private var connectionPollTask: Task<Void, Never>?
@@ -54,7 +77,14 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     var isRunning: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return readiness.isStarted && (!packetMode || packetProviderAdapter != nil)
+        let endpoints = readiness.currentEndpoints
+        return PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: packetMode,
+            hasPacketProvider: packetProviderAdapter != nil,
+            packetTransportReady: packetTransportReady,
+            hasSocks: endpoints.hasSocks,
+            coreConnected: readiness.isStarted
+        )
     }
 
     var localProxyHost: String { "127.0.0.1" }
@@ -125,7 +155,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         let previousGeneration: UInt64
         let previousTunnel: PsiphonTunnel?
         let previousContinuation: CheckedContinuation<Void, Error>?
-        let newPacketProviderAdapter = packetTunnel.map { PsiphonPacketTunnelProviderAdapter(io: $0) }
+        let newPacketProviderAdapter: PsiphonPacketTunnelProviderAdapter?
 
         lock.lock()
         previousGeneration = activeGeneration
@@ -148,6 +178,15 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         activeGeneration = generation
         tunnel = nil
         packetMode = packetTunnel != nil
+        packetTransportReady = false
+        newPacketProviderAdapter = packetTunnel.map { packetTunnel in
+            PsiphonPacketTunnelProviderAdapter(
+                io: packetTunnel,
+                transportStateHandler: { [weak self] state in
+                    self?.handlePacketTransportState(state, generation: generation)
+                }
+            )
+        }
         packetProviderAdapter = newPacketProviderAdapter
         _lastError = nil
         self.configJSON = configWithStore
@@ -194,7 +233,8 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
                     try? await Task.sleep(nanoseconds: UInt64((self?.connectWaitSeconds ?? 90) * 1_000_000_000))
                     guard !Task.isCancelled else { return }
                     self?.failStartIfStillWaiting(
-                        reason: "psiphon_connect_timeout",
+                        reason: self?.startTimeoutReason(generation: generation)
+                            ?? "psiphon_connect_timeout",
                         generation: generation
                     )
                 }
@@ -257,6 +297,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         fallbackTask = conduitFallbackTask
         conduitFallbackTask = nil
         packetMode = false
+        packetTransportReady = false
         packetProviderAdapter = nil
         tunnel = nil
         callbackProxy = nil
@@ -333,6 +374,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         conduitFallbackTask = nil
         tunnelToStop = tunnel
         packetMode = false
+        packetTransportReady = false
         packetProviderAdapter = nil
         tunnel = nil
         callbackProxy = nil
@@ -371,6 +413,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         fallbackTask = conduitFallbackTask
         conduitFallbackTask = nil
         packetMode = false
+        packetTransportReady = false
         packetProviderAdapter = nil
         lock.unlock()
 
@@ -384,6 +427,40 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         continuation?.resume(throwing: CancellationError())
     }
 
+    private func startTimeoutReason(generation callbackGeneration: UInt64) -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeGeneration == callbackGeneration else {
+            return "psiphon_connect_timeout"
+        }
+        if packetMode && !packetTransportReady {
+            return "psiphon_packet_transport_timeout"
+        }
+        return "psiphon_connect_timeout"
+    }
+
+    private func handlePacketTransportState(_ state: String, generation callbackGeneration: UInt64) {
+        lock.lock()
+        guard activeGeneration == callbackGeneration,
+              packetMode,
+              packetProviderAdapter != nil else {
+            lock.unlock()
+            return
+        }
+        packetTransportReady = state == "ready"
+        lock.unlock()
+
+        SharedLogger.shared.logRaw(
+            "PSIPHON_PACKET_TRANSPORT_STATE",
+            detail: "generation=\(callbackGeneration) state=\(state)"
+        )
+        guard state == "ready" else { return }
+        finishStartIfReady(
+            generation: callbackGeneration,
+            endpoints: readiness.currentEndpoints
+        )
+    }
+
     private func logProxyMode(endpoints: PsiphonLocalProxyEndpoints) {
         guard endpoints.hasSocks else { return }
         SharedLogger.shared.logRaw(
@@ -395,43 +472,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     private func handleReadinessEvent(_ event: PsiphonReadinessStateMachine.Event) {
         switch event {
         case .started(let generation, let endpoints):
-            let continuation: CheckedContinuation<Void, Error>
-            let timeoutTask: Task<Void, Never>?
-            lock.lock()
-            guard activeGeneration == generation else {
-                lock.unlock()
-                return
-            }
-            let nativePacketMode = packetMode
-            guard !nativePacketMode || packetProviderAdapter != nil else {
-                lock.unlock()
-                failStartIfStillWaiting(
-                    reason: "packet_tunnel_provider_not_ready",
-                    generation: generation
-                )
-                return
-            }
-            guard
-                  let claimedContinuation = startAttemptCoordinator.claim(
-                    .started,
-                    generation: generation
-                  ) else {
-                lock.unlock()
-                return
-            }
-            continuation = claimedContinuation
-            timeoutTask = startTimeoutTask
-            startTimeoutTask = nil
-            lock.unlock()
-
-            timeoutTask?.cancel()
-            SharedLogger.shared.log(.psiphonStarted)
-            logProxyMode(endpoints: endpoints)
-            SharedLogger.shared.log(
-                .psiphonLocalProxy,
-                detail: "socks=\(endpoints.socksPort) http=\(endpoints.httpPort) packet_mode=\(nativePacketMode)"
-            )
-            continuation.resume()
+            finishStartIfReady(generation: generation, endpoints: endpoints)
 
         case .endpointsChanged(let generation, let endpoints):
             let handler: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)?
@@ -455,6 +496,54 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         case .cancelled:
             break
         }
+    }
+
+    /// Full packet mode requires the generation-safe proxy readiness used by
+    /// mandatory in-tunnel DoH and the independently established packet
+    /// transport channel. Either signal may arrive first.
+    private func finishStartIfReady(
+        generation callbackGeneration: UInt64,
+        endpoints: PsiphonLocalProxyEndpoints
+    ) {
+        let continuation: CheckedContinuation<Void, Error>
+        let timeoutTask: Task<Void, Never>?
+        let nativePacketMode: Bool
+        let packetReady: Bool
+        lock.lock()
+        guard activeGeneration == callbackGeneration else {
+            lock.unlock()
+            return
+        }
+        nativePacketMode = packetMode
+        packetReady = packetTransportReady
+        let ready = PsiphonPacketTunnelCapabilities.isReadyForStart(
+            packetMode: nativePacketMode,
+            hasPacketProvider: packetProviderAdapter != nil,
+            packetTransportReady: packetReady,
+            hasSocks: endpoints.hasSocks,
+            coreConnected: readiness.isStarted
+        )
+        guard ready,
+              let claimedContinuation = startAttemptCoordinator.claim(
+                .started,
+                generation: callbackGeneration
+              ) else {
+            lock.unlock()
+            return
+        }
+        continuation = claimedContinuation
+        timeoutTask = startTimeoutTask
+        startTimeoutTask = nil
+        lock.unlock()
+
+        timeoutTask?.cancel()
+        SharedLogger.shared.log(.psiphonStarted)
+        logProxyMode(endpoints: endpoints)
+        SharedLogger.shared.log(
+            .psiphonLocalProxy,
+            detail: "socks=\(endpoints.socksPort) http=\(endpoints.httpPort) packet_mode=\(nativePacketMode) packet_transport=\(packetReady)"
+        )
+        continuation.resume()
     }
 
     private func isCurrentGeneration(_ callbackGeneration: UInt64) -> Bool {
@@ -587,6 +676,11 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
 
     fileprivate func handleConnecting(generation: UInt64) {
         guard isCurrentCallbackGeneration(generation) else { return }
+        lock.lock()
+        if activeGeneration == generation {
+            packetTransportReady = false
+        }
+        lock.unlock()
         readiness.markCoreDisconnected(generation: generation)
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
         TunnelStatisticsStore.setConnectedTunnelProtocol("")
@@ -812,13 +906,28 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
 
     private func handleCoreDisconnected(generation: UInt64) {
         guard isCurrentCallbackGeneration(generation) else { return }
+        lock.lock()
+        if activeGeneration == generation {
+            packetTransportReady = false
+        }
+        lock.unlock()
         readiness.markCoreDisconnected(generation: generation)
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
     }
 
     fileprivate func handleExiting(generation: UInt64) {
         guard isCurrentCallbackGeneration(generation) else { return }
+        lock.lock()
+        let packetAdapter = activeGeneration == generation && packetMode
+            ? packetProviderAdapter
+            : nil
+        lock.unlock()
         handleCoreDisconnected(generation: generation)
+        packetAdapter?.fail(NSError(
+            domain: "AzadiTunnel.PsiphonPacketTunnel",
+            code: 8,
+            userInfo: [NSLocalizedDescriptionKey: "psiphon_packet_core_exited"]
+        ))
         failStartIfStillWaiting(reason: "psiphon_exiting", generation: generation)
     }
 

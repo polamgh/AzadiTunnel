@@ -177,6 +177,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 )
                 let appSettings = activeSettings
                 let proxyOnly = appSettings.proxyOnlyModeEnabled
+                let packetMTU = MessagingAppsConfiguration.tunnelMTU(for: appSettings)
 
                 if proxyOnly {
                     SharedLogger.shared.log(.proxyOnlyModeEnabled)
@@ -185,7 +186,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     SharedLogger.shared.log(.proxyOnlyModeDisabled)
                 }
 
-                let bridge = proxyOnly ? nil : PsiphonPacketTunnelFlowBridge(packetFlow: self.packetFlow)
+                let bridge = proxyOnly
+                    ? nil
+                    : PsiphonPacketTunnelFlowBridge(packetFlow: self.packetFlow, mtu: packetMTU)
                 bridge?.setFailureHandler { [weak self] error in
                     self?.handlePacketBridgeFailure(error)
                 }
@@ -214,7 +217,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 let networkSettings = proxyOnly
                     ? Self.makeProxyOnlyNetworkSettings()
-                    : Self.makeNetworkSettings(packetEngineCapabilities: packetEngineCapabilities)
+                    : Self.makeNetworkSettings(
+                        packetEngineCapabilities: packetEngineCapabilities,
+                        appSettings: appSettings,
+                        mtu: packetMTU
+                    )
                 try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                     self.setTunnelNetworkSettings(networkSettings) { error in
                         if let error { cont.resume(throwing: error) }
@@ -764,7 +771,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private static func makeNetworkSettings(
-        packetEngineCapabilities: PacketEngineCapabilities
+        packetEngineCapabilities: PacketEngineCapabilities,
+        appSettings: AppSettings,
+        mtu: Int
     ) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
@@ -773,12 +782,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // Iran / custom / domain bypass: matching destination IPs leave through the device's normal
         // interface instead of the tunnel. iOS honors excludedRoutes at the IP layer.
         let store = SharedSettingsStore.shared
-        let appSettings = store.effectiveAppSettings
         let bypassEnabled = appSettings.bypassIranIPsEnabled
         let (excluded, excludedBypassRoutes) = bypassEnabled
             ? Self.buildBypassExcludedRoutes()
             : (neRoutes: [NEIPv4Route](), bypassRoutes: [BypassRoute]())
-        let mtu = MessagingAppsConfiguration.tunnelMTU(for: appSettings)
         if !excluded.isEmpty {
             ipv4.excludedRoutes = excluded
         }

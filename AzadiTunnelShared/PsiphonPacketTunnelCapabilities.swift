@@ -21,6 +21,23 @@ enum PsiphonPacketTunnelCapabilities {
     static let supportsIPv4 = true
     static let supportsIPv6 = true
 
+    /// Full packet mode is ready only when the callback, Psiphon's special
+    /// packet transport channel, and the SOCKS listener used by mandatory
+    /// in-tunnel DoH are all live.
+    static func isReadyForStart(
+        packetMode: Bool,
+        hasPacketProvider: Bool,
+        packetTransportReady: Bool,
+        hasSocks: Bool,
+        coreConnected: Bool
+    ) -> Bool {
+        guard coreConnected, hasSocks else { return false }
+        if packetMode {
+            return hasPacketProvider && packetTransportReady
+        }
+        return true
+    }
+
     static func kind(of packet: Data) -> PsiphonPacketTunnelPacketKind? {
         guard let version = packet.first.map({ $0 >> 4 }) else { return nil }
         switch version {

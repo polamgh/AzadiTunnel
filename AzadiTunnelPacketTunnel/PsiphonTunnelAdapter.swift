@@ -88,6 +88,12 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         }
     }
 
+    /// The pinned Psiphon callback transport accepts complete IPv4 and IPv6 packets and relays
+    /// both families through the native packet engine.
+    var packetEngineCapabilities: PacketEngineCapabilities {
+        .ipv4AndIPv6
+    }
+
     var lastError: String? {
         lock.lock()
         defer { lock.unlock() }

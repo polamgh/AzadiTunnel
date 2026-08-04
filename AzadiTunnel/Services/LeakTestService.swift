@@ -137,7 +137,8 @@ enum LeakTestService {
                     if ip.hasPrefix("fe80:") {
                         linkLocal6 = true
                     } else if ip.hasPrefix("fc") || ip.hasPrefix("fd") {
-                        // ULA on utun — expected when messaging compat blackholes IPv6 in-tunnel.
+                        // ULA on utun — expected when the packet engine captures unsupported IPv6
+                        // and rejects it inside the extension.
                         linkLocal6 = true
                     } else if !ip.isEmpty && ip != "::1" {
                         global6 = true

@@ -221,6 +221,7 @@ final class NWConnectionTLSClient: @unchecked Sendable {
 enum SecureDNSTransportError: LocalizedError {
     case noResolver
     case noProxy
+    case ipv6Unavailable
     case dohBadStatus(Int)
     case dotBadResponse
     case tlsHandshakeFailed(String)
@@ -232,6 +233,7 @@ enum SecureDNSTransportError: LocalizedError {
         switch self {
         case .noResolver: return "no_resolver"
         case .noProxy: return "no_proxy"
+        case .ipv6Unavailable: return "ipv6_unavailable"
         case .dohBadStatus(let code): return "doh_status:\(code)"
         case .dotBadResponse: return "dot_bad_response"
         case .tlsHandshakeFailed(let detail): return "tls_handshake:\(detail)"

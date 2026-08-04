@@ -40,7 +40,7 @@ enum MessagingAppsConfiguration {
     "graph.whatsapp.com",
   ]
 
-  /// Messaging overlays (lower MTU, IPv4-only DNS, longer relay timeouts) when Secure DNS is active.
+  /// Messaging overlays (lower MTU and longer relay timeouts) when Secure DNS is active.
   static func usesMessagingOverlays(_ settings: AppSettings) -> Bool {
     SecureDNSConfiguration.isActive(settings)
   }
@@ -64,12 +64,6 @@ enum MessagingAppsConfiguration {
 
   static func needsMessagingDnsFallback(qname: String, ipv4Answers: [String]) -> Bool {
     isWhatsAppDomain(qname) && ipv4Answers.isEmpty
-  }
-
-  /// Nudge Telegram/WhatsApp clients toward IPv4 (especially with Secure DNS + CDN Meek).
-  static func prefersIPv4Only(settings: AppSettings, qname: String) -> Bool {
-    guard usesMessagingOverlays(settings) else { return false }
-    return isProtectedDomain(qname) || isWhatsAppDomain(qname)
   }
 
   static func dnsProviderFallbackChain(primary: SecureDNSProvider, qname: String? = nil) -> [SecureDNSProvider] {

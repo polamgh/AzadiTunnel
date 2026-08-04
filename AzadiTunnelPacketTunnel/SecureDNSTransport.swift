@@ -8,7 +8,8 @@ enum SecureDNSTransport {
         socksPort: Int,
         httpPort: Int,
         queryId: UInt16 = 0,
-        qname: String = ""
+        qname: String = "",
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) async throws -> Data {
         let result = try await SecureDNSResolver.resolve(
             wireQuery: wireQuery,
@@ -16,7 +17,8 @@ enum SecureDNSTransport {
             qname: qname,
             settings: settings,
             socksPort: socksPort,
-            httpPort: httpPort
+            httpPort: httpPort,
+            packetEngineCapabilities: packetEngineCapabilities
         )
         return result.payload
     }

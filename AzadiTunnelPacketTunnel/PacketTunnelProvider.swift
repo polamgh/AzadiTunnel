@@ -161,6 +161,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     self?.scheduleEndpointUpdate(endpoints, for: psiphonEngine)
                 }
                 let entriesPath = SharedSettingsStore.shared.psiphonServerEntriesPath
+                let packetEngineCapabilities = psiphonEngine.packetEngineCapabilities
+                SharedLogger.shared.logRaw(
+                    "PACKET_ENGINE_CAPABILITIES",
+                    detail: "ipv6=\(packetEngineCapabilities.logValue)"
+                )
                 let appSettings = SharedSettingsStore.shared.appSettings
                 let proxyOnly = appSettings.proxyOnlyModeEnabled
 
@@ -200,7 +205,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 let networkSettings = proxyOnly
                     ? Self.makeProxyOnlyNetworkSettings()
-                    : Self.makeNetworkSettings()
+                    : Self.makeNetworkSettings(packetEngineCapabilities: packetEngineCapabilities)
                 try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                     self.setTunnelNetworkSettings(networkSettings) { error in
                         if let error { cont.resume(throwing: error) }
@@ -223,13 +228,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                             packetFlow: self.packetFlow,
                             socksHost: dnsEndpoints.host,
                             socksPort: dnsEndpoints.socksPort,
-                            httpPort: dnsEndpoints.httpPort
+                            httpPort: dnsEndpoints.httpPort,
+                            packetEngineCapabilities: packetEngineCapabilities
                         )
                     }
                     bridge?.start()
                     SharedLogger.shared.logRaw(
                         "PSIPHON_NATIVE_PACKET_TUNNEL_READY",
-                        detail: "ip_versions=ipv4,ipv6 transports=tcp,udp dns=core_plus_secure_dns_callback"
+                        detail: "capability=\(packetEngineCapabilities.logValue) transports=tcp,udp dns=core_plus_secure_dns_callback"
                     )
                 }
 
@@ -362,6 +368,127 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
+#if false
+    private func startSecureDnsSystemProxyIfUsable(
+        settings: AppSettings,
+        endpoints: PsiphonLocalProxyEndpoints
+    ) async -> Bool {
+        let upstream = LANProxyBridge.Endpoints(
+            psiphonHost: endpoints.host,
+            psiphonHttpPort: endpoints.httpPort,
+            psiphonSocksPort: endpoints.socksPort
+        )
+        guard await secureDnsSystemProxy.startLoopbackHTTPProxy(upstream: upstream) else {
+            return false
+        }
+
+        let query = SecureDNSConfiguration.exampleComWireQuery
+        let queryId = SecureDNSResolver.queryId(from: query)
+        guard let endpoint = SecureDNSConfiguration.dohEndpoint(for: settings) else {
+            secureDnsSystemProxy.stopLoopbackHTTPProxy()
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
+                detail: "reason=no_doh_endpoint mode=\(settings.secureDNSMode.rawValue)"
+            )
+            return false
+        }
+
+        do {
+            let payload = try await SecureDNSDoHClient.post(
+                endpoint: endpoint,
+                provider: settings.secureDNSProvider,
+                wireQuery: query,
+                socksPort: endpoints.socksPort,
+                httpPort: endpoints.httpPort,
+                queryId: queryId,
+                qname: "example.com"
+            )
+            _ = try SecureDNSResolver.validateDNSWireResponse(payload, expectedId: queryId)
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_SYSTEM_HTTP_PROXY_READY",
+                detail: "secure_dns_probe=ok provider=\(settings.secureDNSProvider.rawValue)"
+            )
+            return true
+        } catch {
+            secureDnsSystemProxy.stopLoopbackHTTPProxy()
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
+                detail: "reason=doh_probe_failed provider=\(settings.secureDNSProvider.rawValue) error=\(error.localizedDescription)"
+            )
+            if settings.blockCleartextDNS {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_PROXY",
+                    detail: "disabled_bridge_probe_failed block_cleartext=true mode=\(settings.secureDNSMode.rawValue)"
+                )
+            } else {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FALLBACK",
+                    detail: "using_psiphon_http reason=doh_probe_failed block_cleartext=false"
+                )
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_bridge_doh_probe_failed block_cleartext=false"
+                )
+            }
+            return false
+        }
+    }
+
+    private func startSecureDnsSystemProxyActivationIfNeeded(
+        settings: AppSettings,
+        endpoints: PsiphonLocalProxyEndpoints,
+        packetEngineCapabilities: PacketEngineCapabilities,
+        proxyOnly: Bool
+    ) {
+        secureDnsSystemProxyTask?.cancel()
+        guard !proxyOnly,
+              settings.secureDNSMode == .doh,
+              SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: settings) else {
+            return
+        }
+
+        secureDnsSystemProxyTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            guard !Task.isCancelled else { return }
+
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_SYSTEM_HTTP_PROXY_PROBE",
+                detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue)"
+            )
+            let usable = await self.startSecureDnsSystemProxyIfUsable(
+                settings: settings,
+                endpoints: endpoints
+            )
+            guard usable, !Task.isCancelled else { return }
+
+            let updatedSettings = Self.makeNetworkSettings(
+                endpoints: endpoints,
+                packetEngineCapabilities: packetEngineCapabilities,
+                secureDnsSystemProxyActive: true
+            )
+            do {
+                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                    self.setTunnelNetworkSettings(updatedSettings) { error in
+                        if let error { cont.resume(throwing: error) }
+                        else { cont.resume() }
+                    }
+                }
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_PROXY_ACTIVATED",
+                    detail: "using_loopback_bridge port=\(SecureDNSConfiguration.systemHTTPProxyPort)"
+                )
+            } catch {
+                self.secureDnsSystemProxy.stopLoopbackHTTPProxy()
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
+                    detail: "reason=apply_network_settings_failed error=\(error.localizedDescription)"
+                )
+            }
+        }
+    }
+
+#endif
     private func startStatsSampler() {
         statsTimer?.cancel()
         statsTimer = Task {
@@ -750,7 +877,9 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private static func makeNetworkSettings() -> NEPacketTunnelNetworkSettings {
+    private static func makeNetworkSettings(
+        packetEngineCapabilities: PacketEngineCapabilities
+    ) -> NEPacketTunnelNetworkSettings {
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: "127.0.0.1")
         let ipv4 = NEIPv4Settings(addresses: ["10.0.0.2"], subnetMasks: ["255.255.255.0"])
         ipv4.includedRoutes = [NEIPv4Route.default()]
@@ -769,19 +898,39 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         settings.ipv4Settings = ipv4
         settings.mtu = NSNumber(value: mtu)
-        let messagingOverlays = MessagingAppsConfiguration.usesMessagingOverlays(appSettings)
+        let routePlan = PacketEngineRoutePlan.fullTunnel(for: packetEngineCapabilities)
         SharedLogger.shared.logRaw(
             "TUNNEL_MTU",
-            detail: "mtu=\(mtu) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled) messaging_overlays=\(messagingOverlays)"
+            detail: "mtu=\(mtu) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled)"
         )
 
-        let ipv6 = NEIPv6Settings(addresses: ["fd00::2"], networkPrefixLengths: [64])
-        ipv6.includedRoutes = [NEIPv6Route.default()]
-        settings.ipv6Settings = ipv6
-        SharedLogger.shared.logRaw(
-            "TUNNEL_IPV6_NATIVE_PACKET",
-            detail: "enabled=true policy=included_default_route relay=psiphon_packet_transport"
-        )
+        if routePlan.installsIPv6CaptureRoute {
+            let ipv6 = NEIPv6Settings(addresses: ["fd00::2"], networkPrefixLengths: [64])
+            let route = routePlan.installsIPv6DefaultRoute
+                ? NEIPv6Route.default()
+                : NEIPv6Route(destinationAddress: "::", networkPrefixLength: NSNumber(value: 0))
+            ipv6.includedRoutes = [route]
+            settings.ipv6Settings = ipv6
+            if routePlan.installsIPv6DefaultRoute {
+                SharedLogger.shared.logRaw(
+                    "TUNNEL_IPV6_ROUTE",
+                    detail: "enabled=true policy=engine_relay capability=\(packetEngineCapabilities.logValue)"
+                )
+            } else {
+                SharedLogger.shared.logRaw(
+                    "TUNNEL_IPV6_CAPTURE_REJECT",
+                    detail: "enabled=true policy=icmpv6_unreachable aaaa_suppressed=true capability=\(packetEngineCapabilities.logValue)"
+                )
+            }
+        } else {
+            // A packet engine may opt out of capture only if its Network Extension integration
+            // provides an equivalent global IPv6 firewall. The current plan always captures so
+            // literal IPv6 cannot bypass the tunnel.
+            SharedLogger.shared.logRaw(
+                "TUNNEL_IPV6_UNAVAILABLE",
+                detail: "enabled=false policy=engine_declined_capture capability=\(packetEngineCapabilities.logValue)"
+            )
+        }
 
         // IPv4 UDP/53 is intercepted by TunnelDnsForwarder when Secure DNS is
         // active; Psiphon's native packet transport handles the core DNS path.
@@ -799,7 +948,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         MessagingAppsDiagnostics.logCompatibilityStartup(
             settings: appSettings,
             excludedRoutes: excludedBypassRoutes,
-            mtu: mtu
+            mtu: mtu,
+            packetEngineCapabilities: packetEngineCapabilities
         )
         MessagingAppsDiagnostics.runDomainChecks(excludedRoutes: excludedBypassRoutes)
 

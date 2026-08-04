@@ -9,7 +9,7 @@ enum PsiphonLocalProxyType: String, Sendable {
 }
 
 /// Stable Swift-facing surface for tunnel-core (live implementation in packet tunnel target only).
-protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable {
+protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable, PacketEngineCapabilityProviding {
     var isRunning: Bool { get }
     var localProxyHost: String { get }
     var localProxyPort: Int { get }

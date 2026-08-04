@@ -9,11 +9,13 @@ enum MessagingAppsDiagnostics {
   static func logCompatibilityStartup(
     settings: AppSettings,
     excludedRoutes: [BypassRoute],
-    mtu: Int
+    mtu: Int,
+    packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
   ) {
     let compat = settings.messagingAppsCompatibilityModeEnabled
     let overlays = MessagingAppsConfiguration.usesMessagingOverlays(settings)
     let effective = MessagingAppsConfiguration.tunnelSettings(from: settings)
+    let routePlan = PacketEngineRoutePlan.fullTunnel(for: packetEngineCapabilities)
     SharedLogger.shared.logRaw(
       "MESSAGING_COMPAT_STATUS",
       detail: [
@@ -24,8 +26,8 @@ enum MessagingAppsDiagnostics {
         "bypass_iran=\(settings.bypassIranIPsEnabled)",
         "excluded_routes=\(excludedRoutes.count)",
         "udp_relay=native_packet",
-        "ipv6_relay=native_packet",
-        "ipv6_policy=native_packet",
+        "ipv6_relay=\(packetEngineCapabilities.logValue)",
+        "ipv6_policy=\(routePlan.installsIPv6DefaultRoute ? "engine_relay" : "capture_icmpv6_reject_and_aaaa_suppress")",
       ].joined(separator: " ")
     )
     if overlays {

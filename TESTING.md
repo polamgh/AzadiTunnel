@@ -49,6 +49,15 @@ xcodebuild build \
   -destination 'generic/platform=iOS'
 ```
 
+## IPv6 routing policy
+
+The dependency-free regression harness covers capability migration, route construction, global
+AAAA suppression, and ICMPv6 rejection for captured literal IPv6 traffic:
+
+```bash
+bash Scripts/run-ipv6-routing-tests.sh
+```
+
 ## Protocol parity (Shiro Khorshid)
 
 Static check (protocol names vs Android APK):

@@ -18,9 +18,11 @@ enum TunnelDnsForwarder {
         packetFlow: NEPacketTunnelFlow,
         socksHost: String,
         socksPort: Int,
-        httpPort: Int
+        httpPort: Int,
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) -> Bool {
         let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
+        let routePlan = PacketEngineRoutePlan.fullTunnel(for: packetEngineCapabilities)
         guard let parsed = parseDnsQuery(packet: packet) else { return false }
         let queryId = SecureDNSResolver.queryId(from: parsed.dnsPayload)
         guard let question = parseQuestion(parsed.dnsPayload) else {
@@ -53,25 +55,15 @@ enum TunnelDnsForwarder {
             "DNS_PACKET_RECEIVED",
             detail: "id=\(queryId) qname=\(question.qname) qtype=\(question.qtype) dst=\(dstIP):\(parsed.dstPort)"
         )
-        let baseSettings = SharedSettingsStore.shared.appSettings
-        if question.qtype == 28,
-           !SecureDNSConfiguration.isActive(settings)
-           || MessagingAppsConfiguration.prefersIPv4Only(settings: baseSettings, qname: question.qname) {
+        if routePlan.shouldSuppressAAAA(qtype: question.qtype) {
             queue.async {
                 let empty = buildEmptyNoErrorResponse(query: parsed.dnsPayload, question: question)
                 let out = buildUdpResponsePacket(from: parsed, dnsPayload: empty)
                 packetFlow.writePackets([out], withProtocols: [protocolNumber])
-                let ipv4Only = MessagingAppsConfiguration.prefersIPv4Only(settings: baseSettings, qname: question.qname)
                 SharedLogger.shared.logRaw(
                     "DNS_RESPONSE_SENT",
-                    detail: "id=\(queryId) secure=false qtype=AAAA_empty qname=\(question.qname) messaging_ipv4_only=\(ipv4Only)"
+                    detail: "id=\(queryId) secure=false qtype=AAAA_empty qname=\(question.qname) policy=packet_engine_ipv6_unavailable"
                 )
-                if ipv4Only {
-                    SharedLogger.shared.logRaw(
-                        "MESSAGING_IPV4_PREFERRED",
-                        detail: "id=\(queryId) qname=\(question.qname) action=aaaa_empty"
-                    )
-                }
             }
             return true
         }
@@ -105,7 +97,8 @@ enum TunnelDnsForwarder {
                         socksPort: socksPort,
                         httpPort: httpPort,
                         settings: settings,
-                        queryId: queryId
+                        queryId: queryId,
+                        packetEngineCapabilities: packetEngineCapabilities
                     )
                     let out = buildUdpResponsePacket(from: parsed, dnsPayload: responsePayload)
                     packetFlow.writePackets([out], withProtocols: [protocolNumber])
@@ -306,7 +299,8 @@ enum TunnelDnsForwarder {
         socksPort: Int,
         httpPort: Int,
         settings: AppSettings,
-        queryId: UInt16
+        queryId: UInt16,
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) async throws -> (Data, Bool, SecureDNSProvider?) {
         if SecureDNSConfiguration.isActive(settings) {
             do {
@@ -320,7 +314,8 @@ enum TunnelDnsForwarder {
                         qname: question.qname,
                         settings: settings,
                         socksPort: socksPort,
-                        httpPort: httpPort
+                        httpPort: httpPort,
+                        packetEngineCapabilities: packetEngineCapabilities
                     )
                     result = resolved.result
                     provider = resolved.provider
@@ -331,13 +326,17 @@ enum TunnelDnsForwarder {
                         qname: question.qname,
                         settings: settings,
                         socksPort: socksPort,
-                        httpPort: httpPort
+                        httpPort: httpPort,
+                        packetEngineCapabilities: packetEngineCapabilities
                     )
                     provider = settings.secureDNSProvider
                 }
                 SharedSettingsStore.shared.secureDNSWarning = nil
                 return (result.payload, result.usedSecurePath, provider)
             } catch {
+                if case SecureDNSTransportError.ipv6Unavailable = error {
+                    throw error
+                }
                 if settings.blockCleartextDNS {
                     SharedLogger.shared.log(.secureDnsCleartextBlocked, detail: "id=\(queryId) reason=\(error.localizedDescription)")
                     SharedSettingsStore.shared.secureDNSWarning = "blocked"

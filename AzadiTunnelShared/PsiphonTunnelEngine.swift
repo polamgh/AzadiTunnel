@@ -20,6 +20,7 @@ final class PsiphonTunnelEngine: @unchecked Sendable {
     var localProxyPort: Int { core.localProxyPort }
     var localProxyType: PsiphonLocalProxyType { core.localProxyType }
     var localProxyEndpoints: PsiphonLocalProxyEndpoints { core.localProxyEndpoints }
+    var packetEngineCapabilities: PacketEngineCapabilities { core.packetEngineCapabilities }
     var lastError: String? { core.lastError }
 
     var onLocalProxyEndpointsChanged: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)? {

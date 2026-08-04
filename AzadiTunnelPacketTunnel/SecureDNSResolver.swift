@@ -13,8 +13,13 @@ enum SecureDNSResolver {
         qname: String,
         settings: AppSettings,
         socksPort: Int,
-        httpPort: Int
+        httpPort: Int,
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) async throws -> Result {
+        let routePlan = PacketEngineRoutePlan.fullTunnel(for: packetEngineCapabilities)
+        if routePlan.shouldSuppressAAAA(qtype: queryType(from: wireQuery) ?? 0) {
+            throw SecureDNSTransportError.ipv6Unavailable
+        }
         switch settings.secureDNSMode {
         case .off:
             throw SecureDNSTransportError.noResolver
@@ -159,8 +164,13 @@ enum SecureDNSResolver {
         qname: String,
         settings: AppSettings,
         socksPort: Int,
-        httpPort: Int
+        httpPort: Int,
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) async throws -> (result: Result, provider: SecureDNSProvider) {
+        let routePlan = PacketEngineRoutePlan.fullTunnel(for: packetEngineCapabilities)
+        if routePlan.shouldSuppressAAAA(qtype: queryType(from: wireQuery) ?? 0) {
+            throw SecureDNSTransportError.ipv6Unavailable
+        }
         let chain = MessagingAppsConfiguration.dnsProviderFallbackChain(
             primary: settings.secureDNSProvider,
             qname: qname
@@ -181,7 +191,8 @@ enum SecureDNSResolver {
                     qname: qname,
                     settings: trial,
                     socksPort: socksPort,
-                    httpPort: httpPort
+                    httpPort: httpPort,
+                    packetEngineCapabilities: packetEngineCapabilities
                 )
                 if !wantsIPv4 {
                     return (result, provider)
@@ -250,7 +261,8 @@ enum SecureDNSResolver {
         settings: AppSettings,
         socksPort: Int,
         httpPort: Int,
-        depth: Int = 0
+        depth: Int = 0,
+        packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) async throws -> Result {
         let result = try await resolve(
             wireQuery: wireQuery,
@@ -258,7 +270,8 @@ enum SecureDNSResolver {
             qname: qname,
             settings: settings,
             socksPort: socksPort,
-            httpPort: httpPort
+            httpPort: httpPort,
+            packetEngineCapabilities: packetEngineCapabilities
         )
         if !ipv4Answers(from: result.payload).isEmpty || depth >= 4 {
             return result
@@ -279,7 +292,8 @@ enum SecureDNSResolver {
             settings: settings,
             socksPort: socksPort,
             httpPort: httpPort,
-            depth: depth + 1
+            depth: depth + 1,
+            packetEngineCapabilities: packetEngineCapabilities
         )
     }
 

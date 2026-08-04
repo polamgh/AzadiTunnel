@@ -75,6 +75,29 @@ Objective-C `PsiphonTunnel`:
 
 Swift wrapper in AzadiTunnel: `PsiphonTunnelAdapter` bridges to this API when framework is present.
 
+### Readiness and reconnect invariants
+
+The adapter treats `connected` and a positive SOCKS port as required readiness. An HTTP port is
+preferred, but it is allowed to arrive later; a bounded grace period publishes SOCKS-only mode
+when it does not. Every start attempt has a generation. The callback proxy keeps that generation
+immutable, and readiness callbacks are gated until the synchronous `start` call has returned and
+the adapter has seeded the state machine from the framework's atomic port/state getters. This is
+important because the official iOS wrapper reuses a singleton: `newPsiphonTunnel:` synchronously
+stops the prior instance before replacing its delegate, while delegate callbacks are serialized.
+Consequently, callbacks from an older attempt cannot be relabeled as readiness for a newer one;
+late callbacks are ignored by generation. This reasoning is based on the upstream
+[`PsiphonTunnel.h`](https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core/master/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h)
+delegate contract and
+[`PsiphonTunnel.m`](https://raw.githubusercontent.com/Psiphon-Labs/psiphon-tunnel-core/master/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m)
+singleton implementation.
+
+The library assigns local ports when config ports are omitted, so a reconnect may produce new
+SOCKS/HTTP endpoints. Endpoint changes are coalesced and applied to all consumers without
+restarting packet forwarding: `NEPacketTunnelNetworkSettings`, the tun2socks delegate used for
+new flows, the LAN proxy's upstream for new sessions, and the secure-DNS loopback bridge. Existing
+relay sessions retain the endpoint they already connected to. This keeps SOCKS-only operation
+valid when HTTP never appears while avoiding a forwarding interruption when HTTP arrives late.
+
 ## License obligations
 
 - **License:** GNU General Public License **v3** (`LICENSE` in repo).

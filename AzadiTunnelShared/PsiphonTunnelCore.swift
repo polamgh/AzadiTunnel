@@ -8,18 +8,6 @@ enum PsiphonLocalProxyType: String, Sendable {
     case unknown
 }
 
-/// Local proxies remain available for extension-local DNS and LAN sharing. Full
-/// VPN packet forwarding uses the native Psiphon packet tunnel callback and
-/// does not depend on SOCKS UDP ASSOCIATE.
-struct PsiphonLocalProxyEndpoints: Sendable {
-    let host: String
-    let socksPort: Int
-    let httpPort: Int
-
-    var hasSocks: Bool { socksPort > 0 }
-    var hasHttp: Bool { httpPort > 0 }
-}
-
 /// Stable Swift-facing surface for tunnel-core (live implementation in packet tunnel target only).
 protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable {
     var isRunning: Bool { get }
@@ -28,6 +16,7 @@ protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable {
     var localProxyType: PsiphonLocalProxyType { get }
     var localProxyEndpoints: PsiphonLocalProxyEndpoints { get }
     var lastError: String? { get }
+    var onLocalProxyEndpointsChanged: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)? { get set }
 
     func start(
         configJSON: String,
@@ -78,6 +67,8 @@ enum PsiphonTunnelCoreError: LocalizedError {
 /// Stub used by the main app (never links PsiphonTunnel.framework).
 final class PsiphonTunnelAdapterStub: PsiphonTunnelCoreProtocol, @unchecked Sendable {
     private(set) var lastError: String? = "Psiphon runs in the packet tunnel extension only."
+
+    var onLocalProxyEndpointsChanged: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)?
 
     var isRunning: Bool { false }
     var localProxyHost: String { "127.0.0.1" }

@@ -3,9 +3,16 @@ import Foundation
 /// Unified Psiphon lifecycle wrapper (extension uses live core; app uses stub).
 final class PsiphonTunnelEngine: @unchecked Sendable {
     private let core: PsiphonTunnelCoreProtocol
+    private let endpointHandlerLock = NSLock()
+    private var endpointHandler: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)?
 
     init(core: PsiphonTunnelCoreProtocol) {
         self.core = core
+        core.onLocalProxyEndpointsChanged = { [weak self] endpoints in
+            Task { @MainActor [weak self] in
+                self?.notifyLocalProxyEndpointsChanged(endpoints)
+            }
+        }
     }
 
     var isRunning: Bool { core.isRunning }
@@ -14,6 +21,19 @@ final class PsiphonTunnelEngine: @unchecked Sendable {
     var localProxyType: PsiphonLocalProxyType { core.localProxyType }
     var localProxyEndpoints: PsiphonLocalProxyEndpoints { core.localProxyEndpoints }
     var lastError: String? { core.lastError }
+
+    var onLocalProxyEndpointsChanged: (@Sendable (PsiphonLocalProxyEndpoints) -> Void)? {
+        get {
+            endpointHandlerLock.lock()
+            defer { endpointHandlerLock.unlock() }
+            return endpointHandler
+        }
+        set {
+            endpointHandlerLock.lock()
+            endpointHandler = newValue
+            endpointHandlerLock.unlock()
+        }
+    }
 
     func start(
         configJSON: String,
@@ -67,5 +87,12 @@ final class PsiphonTunnelEngine: @unchecked Sendable {
                 )
             }
         }
+    }
+
+    private func notifyLocalProxyEndpointsChanged(_ endpoints: PsiphonLocalProxyEndpoints) {
+        endpointHandlerLock.lock()
+        let handler = endpointHandler
+        endpointHandlerLock.unlock()
+        handler?(endpoints)
     }
 }

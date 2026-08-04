@@ -1,3 +1,4 @@
+import Foundation
 import NetworkExtension
 
 final class PacketTunnelProvider: NEPacketTunnelProvider {
@@ -11,6 +12,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var connectivityTask: Task<Void, Never>?
     private let psiphonDataDirName = "psiphon-data"
     private let lanProxy = LANProxyBridge()
+    private let endpointUpdateLock = NSLock()
+    private var endpointUpdateTask: Task<Void, Never>?
+    private var pendingEndpointUpdate: PsiphonLocalProxyEndpoints?
+    private var endpointUpdateGeneration: UInt64 = 0
+    private var endpointUpdatesActive = false
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         guard registerStartCompletion(completionHandler) else { return }
@@ -149,7 +155,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 SharedLogger.shared.log(.psiphonCoreSelected, detail: "impl=PsiphonTunnel")
                 let dataDir = try self.psiphonDataDirectory()
                 let psiphonEngine = PsiphonTunnelEngine(core: ExtensionPsiphonCore.make())
-                self.engine = psiphonEngine
+                self.installEngine(psiphonEngine)
+                psiphonEngine.onLocalProxyEndpointsChanged = { [weak self, weak psiphonEngine] endpoints in
+                    guard let psiphonEngine else { return }
+                    self?.scheduleEndpointUpdate(endpoints, for: psiphonEngine)
+                }
                 let entriesPath = SharedSettingsStore.shared.psiphonServerEntriesPath
                 let appSettings = SharedSettingsStore.shared.appSettings
                 let proxyOnly = appSettings.proxyOnlyModeEnabled
@@ -246,6 +256,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     await self.startProxyBridge(using: endpoints, proxyOnly: proxyOnly)
                 }
 
+                self.activateEndpointUpdates(for: psiphonEngine)
+
                 if proxyOnly {
                     Task {
                         let ip = await ProxyOnlyPublicIPService.fetch(endpoints: endpoints)
@@ -284,8 +296,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         SharedLogger.shared.log(.tunnelStopCleanup)
         completionHandler()
 
-        let engineToStop = engine
-        engine = nil
+        let engineToStop = detachEngineAndStopEndpointUpdates()
         guard let engineToStop else { return }
         Task {
             await engineToStop.stopWithTimeout(seconds: 10)
@@ -378,12 +389,168 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         packetBridge = nil
     }
 
+    private func withEndpointUpdateLock<T>(_ body: () -> T) -> T {
+        endpointUpdateLock.lock()
+        defer { endpointUpdateLock.unlock() }
+        return body()
+    }
+
+    private func installEngine(_ newEngine: PsiphonTunnelEngine) {
+        let previousTask = withEndpointUpdateLock { () -> Task<Void, Never>? in
+            let previousTask = endpointUpdateTask
+            endpointUpdateTask = nil
+            pendingEndpointUpdate = nil
+            endpointUpdatesActive = false
+            endpointUpdateGeneration = endpointUpdateGeneration == UInt64.max
+                ? 1
+                : endpointUpdateGeneration + 1
+            engine = newEngine
+            return previousTask
+        }
+        previousTask?.cancel()
+    }
+
+    private func detachEngineAndStopEndpointUpdates() -> PsiphonTunnelEngine? {
+        let detached = withEndpointUpdateLock {
+            let detached = (engine: engine, task: endpointUpdateTask)
+            engine = nil
+            endpointUpdateTask = nil
+            pendingEndpointUpdate = nil
+            endpointUpdatesActive = false
+            endpointUpdateGeneration = endpointUpdateGeneration == UInt64.max
+                ? 1
+                : endpointUpdateGeneration + 1
+            return detached
+        }
+        detached.task?.cancel()
+        return detached.engine
+    }
+
+    private func scheduleEndpointUpdate(
+        _ endpoints: PsiphonLocalProxyEndpoints,
+        for expectedEngine: PsiphonTunnelEngine
+    ) {
+        withEndpointUpdateLock {
+            guard engine === expectedEngine else { return }
+            pendingEndpointUpdate = endpoints
+            guard endpointUpdatesActive, endpointUpdateTask == nil else { return }
+            let generation = endpointUpdateGeneration
+            endpointUpdateTask = Task { [weak self, weak expectedEngine] in
+                guard let expectedEngine else { return }
+                await self?.drainEndpointUpdates(for: expectedEngine, generation: generation)
+            }
+        }
+    }
+
+    private func activateEndpointUpdates(for expectedEngine: PsiphonTunnelEngine) {
+        withEndpointUpdateLock {
+            guard engine === expectedEngine else { return }
+            endpointUpdatesActive = true
+            guard pendingEndpointUpdate != nil, endpointUpdateTask == nil else { return }
+            let generation = endpointUpdateGeneration
+            endpointUpdateTask = Task { [weak self, weak expectedEngine] in
+                guard let expectedEngine else { return }
+                await self?.drainEndpointUpdates(for: expectedEngine, generation: generation)
+            }
+        }
+    }
+
+    private func drainEndpointUpdates(
+        for expectedEngine: PsiphonTunnelEngine,
+        generation updateGeneration: UInt64
+    ) async {
+        while !Task.isCancelled {
+            let snapshot = withEndpointUpdateLock {
+                () -> (isCurrent: Bool, endpoints: PsiphonLocalProxyEndpoints?) in
+                guard endpointUpdateGeneration == updateGeneration,
+                      endpointUpdatesActive,
+                      engine === expectedEngine else {
+                    if endpointUpdateGeneration == updateGeneration {
+                        endpointUpdateTask = nil
+                    }
+                    return (false, nil)
+                }
+                let endpoints = pendingEndpointUpdate
+                pendingEndpointUpdate = nil
+                return (true, endpoints)
+            }
+            guard snapshot.isCurrent else { return }
+
+            guard let endpoints = snapshot.endpoints else {
+                withEndpointUpdateLock {
+                    if endpointUpdateGeneration == updateGeneration {
+                        endpointUpdateTask = nil
+                    }
+                }
+                return
+            }
+
+            await reapplyEndpointSettings(
+                endpoints,
+                for: expectedEngine,
+                generation: updateGeneration
+            )
+        }
+
+        withEndpointUpdateLock {
+            if endpointUpdateGeneration == updateGeneration {
+                endpointUpdateTask = nil
+            }
+        }
+    }
+
+    private func reapplyEndpointSettings(
+        _ endpoints: PsiphonLocalProxyEndpoints,
+        for expectedEngine: PsiphonTunnelEngine,
+        generation updateGeneration: UInt64
+    ) async {
+        guard !Task.isCancelled, isCurrentEndpointUpdate(expectedEngine, generation: updateGeneration) else {
+            return
+        }
+
+        let settings = SharedSettingsStore.shared.appSettings
+        let proxyOnly = settings.proxyOnlyModeEnabled
+        let upstream = LANProxyBridge.Endpoints(
+            psiphonHost: endpoints.host,
+            psiphonHttpPort: endpoints.httpPort,
+            psiphonSocksPort: endpoints.socksPort
+        )
+        // Native packet forwarding remains attached to the Psiphon packet transport. Only
+        // extension-local SOCKS/HTTP consumers need their upstream snapshot refreshed.
+        lanProxy.updateUpstream(upstream)
+        startConnectivityProbe(endpoints: endpoints)
+
+        SharedLogger.shared.logRaw(
+            "PSIPHON_ENDPOINT_REAPPLY",
+            detail: "socks=\(endpoints.socksPort) http=\(endpoints.httpPort) proxy_only=\(proxyOnly)"
+        )
+
+        guard !Task.isCancelled, isCurrentEndpointUpdate(expectedEngine, generation: updateGeneration) else {
+            return
+        }
+        if proxyOnly || settings.shareProxyOnLocalNetworkEnabled {
+            if !lanProxy.isRunning {
+                await startProxyBridge(using: endpoints, proxyOnly: proxyOnly)
+            }
+        }
+    }
+
+    private func isCurrentEndpointUpdate(
+        _ expectedEngine: PsiphonTunnelEngine,
+        generation updateGeneration: UInt64
+    ) -> Bool {
+        withEndpointUpdateLock {
+            endpointUpdateGeneration == updateGeneration
+                && endpointUpdatesActive
+                && engine === expectedEngine
+        }
+    }
+
     private func cleanup() async {
         stopPacketForwarding()
-        if let engine {
+        if let engine = detachEngineAndStopEndpointUpdates() {
             await engine.stopWithTimeout(seconds: 10)
         }
-        engine = nil
         TunnelStatisticsStore.markDisconnected()
     }
 

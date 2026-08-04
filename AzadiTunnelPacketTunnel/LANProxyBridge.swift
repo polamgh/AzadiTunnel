@@ -35,6 +35,7 @@ final class LANProxyBridge: @unchecked Sendable {
     /// POSIX fallback when `NWListener` cannot pin `127.0.0.1` inside the extension (NWError 22).
     private var loopbackHttpListenFD: Int32 = -1
     private var loopbackHttpAcceptSource: DispatchSourceRead?
+    private let loopbackStateLock = NSLock()
     private var loopbackUpstream: Endpoints?
     /// Actual interface a listener bound to ("0.0.0.0" after a Wi-Fi-IP fallback). For logs only.
     private var httpBoundInterface: String?
@@ -45,6 +46,7 @@ final class LANProxyBridge: @unchecked Sendable {
     private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
     private var activeSessions: [ObjectIdentifier: RelaySession] = [:]
     private var activeFDRelaySessions: [ObjectIdentifier: FDRelaySession] = [:]
+    private let configLock = NSLock()
     private var config: Configuration?
     private(set) var lastError: String?
 
@@ -80,7 +82,7 @@ final class LANProxyBridge: @unchecked Sendable {
 
     func start(configuration: Configuration) async -> Result<Void, LANProxyBridgeError> {
         stop()
-        config = configuration
+        setConfiguration(configuration)
         lastError = nil
 
         // Start HTTP and SOCKS independently — one failing must not block the other.
@@ -228,7 +230,7 @@ final class LANProxyBridge: @unchecked Sendable {
         for conn in conns { conn.cancel() }
         for session in sessions { session.cancel() }
         for session in fdSessions { session.cancel() }
-        config = nil
+        setConfiguration(nil)
 
         let store = SharedSettingsStore.shared
         let current = store.lanProxyRuntimeStatus
@@ -253,7 +255,7 @@ final class LANProxyBridge: @unchecked Sendable {
         upstream: Endpoints
     ) async -> Bool {
         stopLoopbackHTTPProxy()
-        loopbackUpstream = upstream
+        setLoopbackUpstream(upstream)
         let outcome = await startSystemHttpListener(
             port: port,
             onAccept: { [weak self] conn in self?.handleLoopbackHttpAccept(conn) }
@@ -273,7 +275,7 @@ final class LANProxyBridge: @unchecked Sendable {
             )
             return true
         case .failure(let err):
-            loopbackUpstream = nil
+            setLoopbackUpstream(nil)
             SharedLogger.shared.logRaw(
                 "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
                 detail: "port=\(port) reason=\(err.shortDescription)"
@@ -294,11 +296,59 @@ final class LANProxyBridge: @unchecked Sendable {
             close(loopbackHttpListenFD)
             loopbackHttpListenFD = -1
         }
-        loopbackUpstream = nil
+        setLoopbackUpstream(nil)
+    }
+
+    /// Changes the upstream ports for new loopback proxy clients without stopping the listener.
+    /// Existing relay sessions retain their captured endpoint snapshot.
+    func updateLoopbackHTTPProxy(upstream: Endpoints) {
+        guard isLoopbackHttpProxyRunning else { return }
+        setLoopbackUpstream(upstream)
+    }
+
+    /// Changes the Psiphon upstream for new LAN proxy clients without stopping listeners.
+    /// Existing relay sessions retain the endpoint snapshot they already dialed.
+    func updateUpstream(_ upstream: Endpoints) {
+        configLock.lock()
+        guard let current = config else {
+            configLock.unlock()
+            return
+        }
+        config = Configuration(
+            bindHost: current.bindHost,
+            httpPort: current.httpPort,
+            socksPort: current.socksPort,
+            upstream: upstream
+        )
+        configLock.unlock()
+    }
+
+    private func setLoopbackUpstream(_ upstream: Endpoints?) {
+        loopbackStateLock.lock()
+        loopbackUpstream = upstream
+        loopbackStateLock.unlock()
+    }
+
+    private func currentLoopbackUpstream() -> Endpoints? {
+        loopbackStateLock.lock()
+        defer { loopbackStateLock.unlock() }
+        return loopbackUpstream
+    }
+
+    private func setConfiguration(_ configuration: Configuration?) {
+        configLock.lock()
+        config = configuration
+        configLock.unlock()
+    }
+
+    private func currentConfiguration() -> Configuration? {
+        configLock.lock()
+        defer { configLock.unlock() }
+        return config
     }
 
     private func handleLoopbackHttpAccept(_ incoming: NWConnection) {
-        guard loopbackUpstream != nil else { incoming.cancel(); return }
+        guard currentLoopbackUpstream() != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.logRaw("SECURE_DNS_SYSTEM_HTTP_CLIENT_CONNECTED")
         incoming.stateUpdateHandler = { [weak self] state in
@@ -323,7 +373,7 @@ final class LANProxyBridge: @unchecked Sendable {
     }
 
     private func serveLoopbackHTTP(_ client: NWConnection) async {
-        guard let upstream = loopbackUpstream else { untrack(client); client.cancel(); return }
+        guard let upstream = currentLoopbackUpstream() else { untrack(client); client.cancel(); return }
         do {
             let head = try await readHTTPHead(client)
             guard let firstLineEnd = head.range(of: Data("\r\n".utf8)) else {
@@ -511,7 +561,7 @@ final class LANProxyBridge: @unchecked Sendable {
     }
 
     private func serveLoopbackHTTPPosix(_ clientFD: Int32) async {
-        guard let upstream = loopbackUpstream else { close(clientFD); return }
+        guard let upstream = currentLoopbackUpstream() else { close(clientFD); return }
         do {
             let head = try await readHTTPHead(fd: clientFD)
             guard let firstLineEnd = head.range(of: Data("\r\n".utf8)) else {
@@ -777,7 +827,7 @@ final class LANProxyBridge: @unchecked Sendable {
     /// proxy, which already handles it.
 
     private func handleHttpAccept(_ incoming: NWConnection) {
-        guard config != nil else { incoming.cancel(); return }
+        guard currentConfiguration() != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxyHttpClientConnected)
         if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
@@ -802,7 +852,7 @@ final class LANProxyBridge: @unchecked Sendable {
     }
 
     private func handleSocksAccept(_ incoming: NWConnection) {
-        guard config != nil else { incoming.cancel(); return }
+        guard currentConfiguration() != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxySocksClientConnected)
         if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
@@ -829,7 +879,7 @@ final class LANProxyBridge: @unchecked Sendable {
     // MARK: - HTTP proxy (CONNECT + absolute-URI)
 
     private func serveHTTP(_ client: NWConnection) async {
-        guard config != nil else { untrack(client); client.cancel(); return }
+        guard currentConfiguration() != nil else { untrack(client); client.cancel(); return }
         do {
             let head = try await readHTTPHead(client)
             guard let firstLineEnd = head.range(of: Data("\r\n".utf8)) else {
@@ -855,7 +905,7 @@ final class LANProxyBridge: @unchecked Sendable {
 
     /// `CONNECT host:port` → dial via Psiphon SOCKS5 → `200` → bidirectional relay.
     private func serveHTTPConnect(client: NWConnection, target: String) async throws {
-        guard let cfg = config else { throw BridgeIOError.protocolError("no_config") }
+        guard let cfg = currentConfiguration() else { throw BridgeIOError.protocolError("no_config") }
         try await serveHTTPConnect(
             client: client,
             target: target,
@@ -902,7 +952,7 @@ final class LANProxyBridge: @unchecked Sendable {
     /// Plain HTTP (e.g. `GET http://host/path`) → transparent relay to Psiphon's HTTP proxy,
     /// which natively handles absolute-URI requests and keep-alive.
     private func serveHTTPPlain(client: NWConnection, initialData: Data) async throws {
-        guard let cfg = config else { throw BridgeIOError.protocolError("no_config") }
+        guard let cfg = currentConfiguration() else { throw BridgeIOError.protocolError("no_config") }
         try await serveHTTPPlain(client: client, initialData: initialData, upstream: cfg.upstream)
     }
 
@@ -922,7 +972,7 @@ final class LANProxyBridge: @unchecked Sendable {
     /// Terminate the client SOCKS5 handshake locally, then re-dial the target through Psiphon's
     /// SOCKS5 proxy. We advertise no-auth and support IPv4 / IPv6 / domain address types.
     private func serveSOCKS(_ client: NWConnection) async {
-        guard let cfg = config else { untrack(client); client.cancel(); return }
+        guard let cfg = currentConfiguration() else { untrack(client); client.cancel(); return }
         do {
             // Greeting: VER=5, NMETHODS, METHODS[NMETHODS]
             let greetingHead = try await receiveExactly(client, 2)

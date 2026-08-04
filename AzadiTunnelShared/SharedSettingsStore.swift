@@ -106,6 +106,12 @@ final class SharedSettingsStore {
                settings.hasCompletedOnboarding || settings.preferredLanguage != .system {
                 settings.hasChosenLanguage = true
             }
+            if settings.messagingAppsCompatibilityModeEnabled {
+                settings.messagingAppsCompatibilityModeEnabled = false
+                if let encoded = try? JSONEncoder().encode(settings) {
+                    defaults.set(encoded, forKey: AppGroupConstants.appSettingsKey)
+                }
+            }
             return settings
         }
         set {

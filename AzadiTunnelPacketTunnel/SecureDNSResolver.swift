@@ -74,6 +74,26 @@ enum SecureDNSResolver {
         return UInt16(payload[0]) << 8 | UInt16(payload[1])
     }
 
+    static func queryType(from wireQuery: Data) -> UInt16? {
+        guard wireQuery.count >= 12 else { return nil }
+        var offset = 12
+        while offset < wireQuery.count {
+            let len = Int(wireQuery[offset])
+            if len == 0 {
+                offset += 1
+                break
+            }
+            if len & 0xc0 == 0xc0 {
+                offset += 2
+                break
+            }
+            guard len < 64, offset + 1 + len <= wireQuery.count else { return nil }
+            offset += 1 + len
+        }
+        guard offset + 4 <= wireQuery.count else { return nil }
+        return UInt16(wireQuery[offset]) << 8 | UInt16(wireQuery[offset + 1])
+    }
+
     static func validateDNSWireResponse(_ data: Data, expectedId: UInt16) throws -> Data {
         guard data.count >= 12 else {
             throw SecureDNSTransportError.dotBadResponse
@@ -141,7 +161,12 @@ enum SecureDNSResolver {
         socksPort: Int,
         httpPort: Int
     ) async throws -> (result: Result, provider: SecureDNSProvider) {
-        let chain = MessagingAppsConfiguration.dnsProviderFallbackChain(primary: settings.secureDNSProvider)
+        let chain = MessagingAppsConfiguration.dnsProviderFallbackChain(
+            primary: settings.secureDNSProvider,
+            qname: qname
+        )
+        let qtype = queryType(from: wireQuery) ?? 1
+        let wantsIPv4 = qtype == 1
         var lastResult: Result?
         var lastProvider = settings.secureDNSProvider
         var lastError: Error?
@@ -158,6 +183,9 @@ enum SecureDNSResolver {
                     socksPort: socksPort,
                     httpPort: httpPort
                 )
+                if !wantsIPv4 {
+                    return (result, provider)
+                }
                 let ips = ipv4Answers(from: result.payload)
                 if !ips.isEmpty {
                     if provider != settings.secureDNSProvider {
@@ -188,7 +216,14 @@ enum SecureDNSResolver {
                 }
             } catch {
                 lastError = error
-                if provider != settings.secureDNSProvider {
+                if let next = chain.dropFirst(chain.firstIndex(of: provider)! + 1).first {
+                    MessagingAppsDiagnostics.logDnsProviderFallback(
+                        domain: qname,
+                        from: provider,
+                        to: next,
+                        reason: error.localizedDescription
+                    )
+                } else if provider != settings.secureDNSProvider {
                     MessagingAppsDiagnostics.logDnsProviderFallback(
                         domain: qname,
                         from: settings.secureDNSProvider,
@@ -199,6 +234,9 @@ enum SecureDNSResolver {
             }
         }
 
+        if wantsIPv4, !settings.blockCleartextDNS {
+            throw lastError ?? SecureDNSTransportError.tlsReadFailed("empty_messaging_a_record")
+        }
         if let lastResult {
             return (lastResult, lastProvider)
         }

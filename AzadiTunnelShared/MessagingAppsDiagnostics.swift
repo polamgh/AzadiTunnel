@@ -12,21 +12,23 @@ enum MessagingAppsDiagnostics {
     mtu: Int
   ) {
     let compat = settings.messagingAppsCompatibilityModeEnabled
+    let overlays = MessagingAppsConfiguration.usesMessagingOverlays(settings)
     let effective = MessagingAppsConfiguration.tunnelSettings(from: settings)
     SharedLogger.shared.logRaw(
       "MESSAGING_COMPAT_STATUS",
       detail: [
         "enabled=\(compat)",
+        "overlays=\(overlays)",
         "mtu=\(mtu)",
         "secure_dns=\(effective.secureDNSMode.rawValue)",
         "bypass_iran=\(settings.bypassIranIPsEnabled)",
         "excluded_routes=\(excludedRoutes.count)",
         "udp_relay=tcp_only",
         "ipv6_relay=none",
-        "ipv6_policy=\(compat ? "blackhole" : "none")",
+        "ipv6_policy=\(overlays ? "blackhole" : "none")",
       ].joined(separator: " ")
     )
-    if compat {
+    if overlays {
       SharedLogger.shared.logRaw(
         "MESSAGING_COMPAT_ACTIVE",
         detail: "mtu=\(mtu) secure_dns=\(effective.secureDNSMode.rawValue) provider=\(effective.secureDNSProvider.rawValue)"
@@ -153,6 +155,14 @@ enum MessagingAppsDiagnostics {
     SharedLogger.shared.logRaw(
       "MESSAGING_IPV6_DROPPED",
       detail: "len=\(length) reason=ipv6_not_relayed"
+    )
+  }
+
+  static func logRelayGateRejected(host: String, port: UInt16) {
+    let app = MessagingAppsConfiguration.messagingApp(host: host, port: port).rawValue
+    SharedLogger.shared.logRaw(
+      "MESSAGING_TCP_RELAY_GATE_FULL",
+      detail: "app=\(app) dest=\(host):\(port) reason=parallel_socks_limit"
     )
   }
 

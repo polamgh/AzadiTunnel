@@ -6,9 +6,21 @@ enum MessagingAppsConfiguration {
     "telegram.org",
     "t.me",
     "web.telegram.org",
+    "cdn-telegram.org",
     "whatsapp.com",
     "whatsapp.net",
     "mmg.whatsapp.net",
+    "facebook.com",
+    "fbcdn.net",
+    "fbsbx.com",
+    "edge-mqtt.facebook.com",
+    "gateway.facebook.com",
+    "mqtt.c10r.facebook.com",
+    "dgw.c10r.facebook.com",
+    "dit.whatsapp.net",
+    "api.whatsapp.net",
+    "g-fallback.whatsapp.net",
+    "graph.whatsapp.com",
   ]
 
   /// WhatsApp endpoints that often return CNAME-only from some DoH providers (e.g. g.whatsapp.net).
@@ -18,7 +30,20 @@ enum MessagingAppsConfiguration {
     "web.whatsapp.com",
     "whatsapp.net",
     "mmg.whatsapp.net",
+    "edge-mqtt.facebook.com",
+    "gateway.facebook.com",
+    "mqtt.c10r.facebook.com",
+    "dgw.c10r.facebook.com",
+    "dit.whatsapp.net",
+    "api.whatsapp.net",
+    "g-fallback.whatsapp.net",
+    "graph.whatsapp.com",
   ]
+
+  /// Messaging overlays (lower MTU, IPv4-only DNS, longer relay timeouts) when Secure DNS is active.
+  static func usesMessagingOverlays(_ settings: AppSettings) -> Bool {
+    SecureDNSConfiguration.isActive(settings)
+  }
 
   static func isWhatsAppDomain(_ host: String) -> Bool {
     let normalized = host.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -29,19 +54,34 @@ enum MessagingAppsConfiguration {
       || normalized.hasSuffix(".whatsapp.com")
       || normalized == "whatsapp.net"
       || normalized.hasSuffix(".whatsapp.net")
+      || normalized == "facebook.com"
+      || normalized.hasSuffix(".facebook.com")
+      || normalized == "fbcdn.net"
+      || normalized.hasSuffix(".fbcdn.net")
+      || normalized == "fbsbx.com"
+      || normalized.hasSuffix(".fbsbx.com")
   }
 
   static func needsMessagingDnsFallback(qname: String, ipv4Answers: [String]) -> Bool {
     isWhatsAppDomain(qname) && ipv4Answers.isEmpty
   }
 
-  /// When messaging compatibility is on, nudge Telegram/WhatsApp clients toward IPv4.
+  /// Nudge Telegram/WhatsApp clients toward IPv4 (especially with Secure DNS + CDN Meek).
   static func prefersIPv4Only(settings: AppSettings, qname: String) -> Bool {
-    guard settings.messagingAppsCompatibilityModeEnabled else { return false }
+    guard usesMessagingOverlays(settings) else { return false }
     return isProtectedDomain(qname) || isWhatsAppDomain(qname)
   }
 
-  static func dnsProviderFallbackChain(primary: SecureDNSProvider) -> [SecureDNSProvider] {
+  static func dnsProviderFallbackChain(primary: SecureDNSProvider, qname: String? = nil) -> [SecureDNSProvider] {
+    if let qname, isWhatsAppDomain(qname) || isProtectedDomain(qname) {
+      // Google DoH tends to return usable A records for Meta MQTT/gateway hosts faster than Cloudflare.
+      var chain: [SecureDNSProvider] = [.google]
+      if primary != .google { chain.append(primary) }
+      for candidate in [SecureDNSProvider.cloudflare, .quad9, .adguard] {
+        if !chain.contains(candidate) { chain.append(candidate) }
+      }
+      return chain
+    }
     var chain: [SecureDNSProvider] = [primary]
     for candidate in [SecureDNSProvider.google, .quad9, .cloudflare, .adguard] {
       if !chain.contains(candidate) { chain.append(candidate) }
@@ -152,25 +192,23 @@ enum MessagingAppsConfiguration {
 
   static func socksRelayTimeouts(for host: String, port: UInt16) -> SocksRelayTimeouts {
     let messaging = isMessagingTcpEndpoint(host: host, port: port)
-    let compat = SharedSettingsStore.shared.appSettings.messagingAppsCompatibilityModeEnabled
-    if messaging && compat {
-      // WhatsApp XMPP (5222) often needs longer SOCKS CONNECT through meek/CDN tunnels.
-      let connect: TimeInterval = (port == 5222 || port == 5223) ? 60 : 35
+    let compat = usesMessagingOverlays(SharedSettingsStore.shared.appSettings)
+    if messaging {
+      // Long-lived chat/media sockets must not use the 8s default read timeout.
+      let connect: TimeInterval
+      if port == 5222 || port == 5223 {
+        connect = compat ? 60 : 45
+      } else if port == 443 || port == 80 {
+        connect = compat ? 45 : 35
+      } else {
+        connect = compat ? 35 : 30
+      }
       return SocksRelayTimeouts(
-        ready: 15,
-        method: 10,
+        ready: compat ? 15 : 12,
+        method: compat ? 10 : 8,
         connectReply: connect,
         receiveChunk: nil,
-        profile: "messaging_compat"
-      )
-    }
-    if messaging {
-      return SocksRelayTimeouts(
-        ready: 10,
-        method: 8,
-        connectReply: 25,
-        receiveChunk: nil,
-        profile: "messaging"
+        profile: compat ? "messaging_compat" : "messaging"
       )
     }
     return SocksRelayTimeouts(
@@ -196,9 +234,9 @@ enum MessagingAppsConfiguration {
     protectedIPv4Prefixes.contains { ip.hasPrefix($0) }
   }
 
-  /// Overlay applied inside the tunnel when compatibility mode is on.
+  /// Overlay applied inside the tunnel when compatibility mode is on (or Secure DNS needs messaging-friendly MTU/DNS).
   static func tunnelSettings(from base: AppSettings) -> AppSettings {
-    guard base.messagingAppsCompatibilityModeEnabled else { return base }
+    guard usesMessagingOverlays(base) else { return base }
     var overlay = base
     if overlay.secureDNSMode == .off {
       overlay.secureDNSMode = .doh
@@ -209,11 +247,11 @@ enum MessagingAppsConfiguration {
   }
 
   static func tunnelMTU(for settings: AppSettings) -> Int {
-    guard settings.messagingAppsCompatibilityModeEnabled else { return 1500 }
+    guard usesMessagingOverlays(settings) else { return 1500 }
     return settings.messagingAppsTunnelMTU.rawValue
   }
 
-  /// Remove messaging destinations from bypass excluded routes when compatibility mode is active.
+  /// Remove messaging destinations from bypass excluded routes when messaging overlays are active.
   static func filterExcludedRoutes(
     _ routes: [BypassRoute],
     compatibilityMode: Bool

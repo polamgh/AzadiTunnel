@@ -153,17 +153,6 @@ enum NoInternetRecoveryController {
             ))
         }
 
-        if original.protocolSelection != .conduit,
-           !original.messagingAppsCompatibilityModeEnabled {
-            plans.append(PhasePlan(
-                phase: .messagingCompat,
-                detail: "messaging_compat=true",
-                mutate: { $0.messagingAppsCompatibilityModeEnabled = true },
-                useChain: true,
-                reconnects: 0
-            ))
-        }
-
         if original.secureDNSMode != .off {
             plans.append(PhasePlan(
                 phase: .secureDnsOff,

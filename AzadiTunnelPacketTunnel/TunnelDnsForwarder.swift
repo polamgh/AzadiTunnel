@@ -319,8 +319,7 @@ enum TunnelDnsForwarder {
                 let result: SecureDNSResolver.Result
                 let provider: SecureDNSProvider
                 if MessagingAppsConfiguration.isWhatsAppDomain(question.qname)
-                    || (MessagingAppsConfiguration.isProtectedDomain(question.qname)
-                        && SharedSettingsStore.shared.appSettings.messagingAppsCompatibilityModeEnabled) {
+                    || MessagingAppsConfiguration.isProtectedDomain(question.qname) {
                     let resolved = try await SecureDNSResolver.resolveForMessaging(
                         wireQuery: query,
                         queryId: queryId,

@@ -27,7 +27,6 @@ struct SettingsView: View {
                 proxyOnlySection
                 shareProxySection
                 bypassSection
-                messagingAppsSection
                 secureDnsSection
                 behaviorSection
                 advancedSection
@@ -307,22 +306,6 @@ struct SettingsView: View {
         Section("Advanced transport") {
             Toggle("Disable timeouts", isOn: $settings.disableTimeouts)
                 .onChange(of: settings.disableTimeouts) { _ in persist("disable_timeouts") }
-        }
-    }
-
-    private var messagingAppsSection: some View {
-        Section {
-            NavigationLink {
-                MessagingAppsSettingsView()
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t(.messagingCompatRowTitle))
-                    Text(L10n.t(.messagingCompatRowSubtitle))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .accessibilityIdentifier("messagingCompatRow")
         }
     }
 

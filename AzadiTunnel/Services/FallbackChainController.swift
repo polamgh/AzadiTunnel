@@ -14,14 +14,6 @@ enum FallbackChainController {
         let cdn = Step(transport: .cdn, protocolSelection: .cdnFronting, beast: true, timeoutSeconds: settings.fallbackTimeoutCDN)
         let auto = Step(transport: .autoBeast, protocolSelection: .auto, beast: true, timeoutSeconds: settings.fallbackTimeoutAutoBeast)
         let direct = Step(transport: .direct, protocolSelection: .direct, beast: false, timeoutSeconds: settings.fallbackTimeoutDirect)
-        if settings.messagingAppsCompatibilityModeEnabled {
-            switch selection {
-            case .cdnFronting: return [cdn, auto, direct]
-            case .auto: return [cdn, auto, direct]
-            case .direct: return [cdn, direct]
-            case .conduit: return []
-            }
-        }
         switch selection {
         case .cdnFronting: return [cdn, auto, direct]
         case .auto: return [cdn, direct]
@@ -32,9 +24,6 @@ enum FallbackChainController {
 
     static func shouldUseChain(for selection: AppSettings.ProtocolSelection) -> Bool {
         let settings = SharedSettingsStore.shared.appSettings
-        if settings.messagingAppsCompatibilityModeEnabled, selection != .conduit {
-            return !steps(for: selection).isEmpty
-        }
         guard settings.smartFallbackChainEnabled else { return false }
         guard selection != .conduit else { return false }
         return !steps(for: selection).isEmpty

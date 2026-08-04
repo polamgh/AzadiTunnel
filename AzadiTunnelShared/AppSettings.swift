@@ -80,7 +80,7 @@ struct AppSettings: Codable, Equatable {
     /// When Secure DNS is on and a query fails, block fallback to legacy DNS (SERVFAIL instead).
     var blockCleartextDNS: Bool = false
 
-    /// Improves Telegram / WhatsApp over full tunnel: lower MTU, protected bypass, DoH, transport retries.
+    /// Legacy toggle; overlays now apply automatically when Secure DNS is on. Kept for settings migration only.
     var messagingAppsCompatibilityModeEnabled: Bool = false
     /// Applied when ``messagingAppsCompatibilityModeEnabled`` is on (default 1280).
     var messagingAppsTunnelMTU: MessagingTunnelMTU = .compat1280

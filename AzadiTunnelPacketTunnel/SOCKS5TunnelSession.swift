@@ -26,6 +26,7 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
     private var closing = false
     private var closeLogged = false
     private var pendingCloseReason: String?
+    private var upstreamSendChain: Task<Void, Never>?
 
     init(
         tcpSocket: TSTCPSocket,
@@ -206,13 +207,19 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
         if bytesUp == 0, bytesDown == 0 {
             diag.log("TCP_RELAY_TUN_DATA", detail: "first_client_bytes=\(data.count)")
         }
-        if let conn = upstream {
-            let chunk = data
-            Task {
-                try? await sendUpstream(chunk)
-            }
+        if upstream != nil {
+            scheduleUpstreamSend(data)
         } else {
             pendingClientData.append(data)
+        }
+    }
+
+    /// Preserve TCP byte order — parallel SOCKS sends corrupt Telegram/WhatsApp streams.
+    private func scheduleUpstreamSend(_ chunk: Data) {
+        let previous = upstreamSendChain
+        upstreamSendChain = Task {
+            _ = await previous?.value
+            try? await self.sendUpstream(chunk)
         }
     }
 
@@ -275,6 +282,8 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
     private func teardown() {
         relayTask?.cancel()
         idleWatchTask?.cancel()
+        upstreamSendChain?.cancel()
+        upstreamSendChain = nil
         upstream?.cancel()
         upstream = nil
         SOCKS5RelayGate.release()
@@ -283,7 +292,7 @@ final class SOCKS5TunnelSession: NSObject, TSTCPSocketDelegate {
 
 /// Limits parallel SOCKS handshakes so Psiphon local proxy is not flooded (Telegram opens many sockets).
 enum SOCKS5RelayGate {
-    private static let maxActive = 64
+    private static let maxActive = 128
     private static var active = 0
     private static let lock = NSLock()
 

@@ -642,9 +642,13 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
         settings.ipv4Settings = ipv4
         settings.mtu = NSNumber(value: mtu)
-        SharedLogger.shared.logRaw("TUNNEL_MTU", detail: "mtu=\(mtu) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled)")
+        let messagingOverlays = MessagingAppsConfiguration.usesMessagingOverlays(appSettings)
+        SharedLogger.shared.logRaw(
+            "TUNNEL_MTU",
+            detail: "mtu=\(mtu) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled) messaging_overlays=\(messagingOverlays)"
+        )
 
-        if appSettings.messagingAppsCompatibilityModeEnabled {
+        if messagingOverlays {
             let ipv6 = NEIPv6Settings(addresses: ["fd00::2"], networkPrefixLengths: [64])
             ipv6.includedRoutes = [NEIPv6Route.default()]
             settings.ipv6Settings = ipv6
@@ -772,7 +776,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private static func buildBypassExcludedRoutes() -> (neRoutes: [NEIPv4Route], bypassRoutes: [BypassRoute]) {
         let store = SharedSettingsStore.shared
         let settings = store.appSettings
-        let messagingCompat = settings.messagingAppsCompatibilityModeEnabled
+        let messagingCompat = MessagingAppsConfiguration.usesMessagingOverlays(settings)
 
         var collected: [BypassRoute] = []
         var seen = Set<BypassRoute>()

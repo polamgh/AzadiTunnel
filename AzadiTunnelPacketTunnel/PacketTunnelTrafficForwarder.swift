@@ -120,7 +120,7 @@ final class PacketTunnelTrafficForwarder {
                 if version == 6 {
                     if Self.ipv6DropLogged < 8 {
                         Self.ipv6DropLogged += 1
-                        if SharedSettingsStore.shared.appSettings.messagingAppsCompatibilityModeEnabled {
+                        if MessagingAppsConfiguration.usesMessagingOverlays(SharedSettingsStore.shared.appSettings) {
                             SharedLogger.shared.logRaw(
                                 "IPV6_BLACKHOLED",
                                 detail: "len=\(packet.count) reason=messaging_compat_no_relay"
@@ -218,6 +218,10 @@ private final class SocksTun2SocksDelegate: NSObject, TSIPStackDelegate {
 
     func didAcceptTCPSocket(_ sock: TSTCPSocket) {
         guard SOCKS5RelayGate.tryAcquire() else {
+            var peer = sock.destinationAddress
+            let peerPort = sock.destinationPort
+            let peerIP = String(cString: inet_ntoa(peer))
+            MessagingAppsDiagnostics.logRelayGateRejected(host: peerIP, port: peerPort)
             sock.reset()
             return
         }

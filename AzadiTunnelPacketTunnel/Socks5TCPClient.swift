@@ -115,13 +115,66 @@ enum Socks5TCPClient {
         let readyTO = readyTimeout == 5 ? timeouts.ready : readyTimeout
         let methodTO = methodTimeout == 5 ? timeouts.method : methodTimeout
         let connectTO = connectReplyTimeout == 8 ? timeouts.connectReply : connectReplyTimeout
-        _ = httpPort
 
         diagnostics?.log(
             "TCP_RELAY_SOCKS_BEGIN",
             detail: "proxy=\(proxyHost):\(proxyPort) timeouts=\(timeouts.profile) ready=\(Int(readyTO)) method=\(Int(methodTO)) connect_reply=\(Int(connectTO))"
         )
 
+        do {
+            return try await openViaSocks5(
+                proxyHost: proxyHost,
+                proxyPort: proxyPort,
+                targetHost: targetHost,
+                targetPort: targetPort,
+                useHostOverrides: useHostOverrides,
+                readyTO: readyTO,
+                methodTO: methodTO,
+                connectTO: connectTO,
+                diagnostics: diagnostics
+            )
+        } catch {
+            guard httpPort > 0, shouldTryHttpConnectFallback(host: targetHost, port: targetPort) else {
+                throw error
+            }
+            diagnostics?.log(
+                "TCP_RELAY_HTTP_CONNECT_TRY",
+                detail: "target=\(targetHost):\(targetPort) socks_err=\(error.localizedDescription)"
+            )
+            MessagingAppsDiagnostics.logTcpRelay(
+                host: targetHost,
+                port: targetPort,
+                ok: false,
+                error: error.localizedDescription,
+                stage: "socks_before_http_connect"
+            )
+            return try await openViaHttpConnect(
+                proxyHost: proxyHost,
+                httpPort: httpPort,
+                targetHost: targetHost,
+                targetPort: targetPort,
+                connectTO: connectTO,
+                diagnostics: diagnostics
+            )
+        }
+    }
+
+    private static func shouldTryHttpConnectFallback(host: String, port: UInt16) -> Bool {
+        guard MessagingAppsConfiguration.isMessagingTcpEndpoint(host: host, port: port) else { return false }
+        return port == 80 || port == 443 || port == 5222 || port == 5223
+    }
+
+    private static func openViaSocks5(
+        proxyHost: String,
+        proxyPort: Int,
+        targetHost: String,
+        targetPort: UInt16,
+        useHostOverrides: Bool,
+        readyTO: TimeInterval,
+        methodTO: TimeInterval,
+        connectTO: TimeInterval,
+        diagnostics: TcpRelayDiagnostics.SessionContext?
+    ) async throws -> NWConnection {
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(proxyHost),
             port: NWEndpoint.Port(integerLiteral: UInt16(proxyPort))
@@ -169,6 +222,63 @@ enum Socks5TCPClient {
         diagnostics?.log(
             "TCP_RELAY_SOCKS_CONNECT_OK",
             detail: "ms=\(Int(Date().timeIntervalSince(connectStarted) * 1000))"
+        )
+        return connection
+    }
+
+    private static func openViaHttpConnect(
+        proxyHost: String,
+        httpPort: Int,
+        targetHost: String,
+        targetPort: UInt16,
+        connectTO: TimeInterval,
+        diagnostics: TcpRelayDiagnostics.SessionContext?
+    ) async throws -> NWConnection {
+        let connection = NWConnection(
+            host: NWEndpoint.Host(proxyHost),
+            port: NWEndpoint.Port(integerLiteral: UInt16(httpPort)),
+            using: connectionParameters(for: targetHost, port: targetPort)
+        )
+        let readyStarted = Date()
+        try await waitReady(connection, timeout: min(15, connectTO))
+        let authority = targetPort == 80 || targetPort == 443
+            ? targetHost
+            : "\(targetHost):\(targetPort)"
+        let request =
+            "CONNECT \(authority) HTTP/1.1\r\n" +
+            "Host: \(authority)\r\n" +
+            "Proxy-Connection: keep-alive\r\n\r\n"
+        try await sendAll(connection, data: Data(request.utf8))
+
+        var head = Data()
+        let deadline = Date().addingTimeInterval(connectTO)
+        while head.count < 16 * 1024, Date() < deadline {
+            let chunk = try await relayReceive(
+                connection,
+                maxLength: min(4096, 16 * 1024 - head.count),
+                timeout: max(0.5, min(connectTO, deadline.timeIntervalSinceNow))
+            )
+            head.append(chunk)
+            if head.range(of: Data("\r\n\r\n".utf8)) != nil { break }
+        }
+        guard let headerEnd = head.range(of: Data("\r\n\r\n".utf8)) else {
+            throw Socks5Error.timeout("http_connect_headers")
+        }
+        let statusLine = String(data: head.subdata(in: 0..<headerEnd.lowerBound), encoding: .utf8)?
+            .split(separator: "\r\n").first.map(String.init) ?? ""
+        guard statusLine.contains(" 200 ") else {
+            diagnostics?.log("TCP_RELAY_HTTP_CONNECT_FAIL", detail: "status=\(statusLine.prefix(80))")
+            throw Socks5Error.connectFailed
+        }
+        diagnostics?.log(
+            "TCP_RELAY_HTTP_CONNECT_OK",
+            detail: "target=\(targetHost):\(targetPort) ms=\(Int(Date().timeIntervalSince(readyStarted) * 1000))"
+        )
+        MessagingAppsDiagnostics.logTcpRelay(
+            host: targetHost,
+            port: targetPort,
+            ok: true,
+            stage: "http_connect"
         )
         return connection
     }

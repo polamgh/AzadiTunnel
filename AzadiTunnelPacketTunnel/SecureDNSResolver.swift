@@ -27,7 +27,7 @@ enum SecureDNSResolver {
             let handle = await coalescer.acquire(for: key) {
                 let result = try await operation()
                 if let lifetime = result.lifetime {
-                    await cache.insert(
+                    await self.cache.insert(
                         response: result.response,
                         for: key,
                         lifetime: lifetime

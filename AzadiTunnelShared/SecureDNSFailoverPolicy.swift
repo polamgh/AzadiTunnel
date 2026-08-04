@@ -9,9 +9,9 @@ enum SecureDNSFailoverPolicy {
         case totalTimeout
     }
 
-    static let perAttemptTimeout: TimeInterval = 2.5
-    static let maxAttempts = 3
-    static let totalTimeout = perAttemptTimeout * TimeInterval(maxAttempts)
+    nonisolated static let perAttemptTimeout: TimeInterval = 2.5
+    nonisolated static let maxAttempts = 3
+    nonisolated static let totalTimeout = perAttemptTimeout * TimeInterval(maxAttempts)
 
     static func endpointsToTry<T>(_ endpoints: [T]) -> ArraySlice<T> {
         endpoints.prefix(maxAttempts)

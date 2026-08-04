@@ -15,7 +15,7 @@ struct SecureDNSDeadline: Equatable, Sendable {
 }
 
 enum SecureDNSMonotonicClock {
-    static var now: TimeInterval {
+    nonisolated static var now: TimeInterval {
         ProcessInfo.processInfo.systemUptime
     }
 }

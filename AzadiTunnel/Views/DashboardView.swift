@@ -138,7 +138,12 @@ struct DashboardView: View {
                     await vpn.runPostConnectDiagnostics()
                 }
                 if ProcessInfo.processInfo.arguments.contains("-UITestVerifyFeatures") {
-                    await UITestFeatureVerifier.runIfRequested()
+                    // SwiftUI may cancel this view task while the VPN status redraws the
+                    // dashboard. Keep the device verifier independent so URLSession requests
+                    // measure the tunnel instead of inheriting a cancelled parent task.
+                    await Task.detached(priority: .userInitiated) {
+                        await UITestFeatureVerifier.runIfRequested()
+                    }.value
                 }
             }
             while !Task.isCancelled {

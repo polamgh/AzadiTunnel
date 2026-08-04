@@ -428,7 +428,7 @@ final class RecoveryTimingTests: XCTestCase {
 
         XCTAssertFalse(plans.contains { $0.phase == .secureDnsOff })
         XCTAssertFalse(plans.contains {
-            $0.attempt.settings.secureDNSMode == .off
+            $0.attempt.settings.secureDNSMode.rawValue == "off"
                 && !$0.attempt.settings.blockCleartextDNS
         })
     }

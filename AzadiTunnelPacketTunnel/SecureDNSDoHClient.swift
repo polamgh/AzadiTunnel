@@ -103,10 +103,10 @@ enum SecureDNSDoHClient {
             targetHost: target,
             targetPort: endpoint.port,
             useHostOverrides: false,
-            deadline: deadline,
             readyTimeout: min(1.0, connectBudget),
             methodTimeout: min(1.0, try remainingBudget(deadline, stage: "doh_method_timeout")),
-            connectReplyTimeout: min(1.5, try remainingBudget(deadline, stage: "doh_connect_reply_timeout"))
+            connectReplyTimeout: min(1.5, try remainingBudget(deadline, stage: "doh_connect_reply_timeout")),
+            deadline: deadline
         )
         defer { connection.cancel() }
 

@@ -21,11 +21,17 @@ enum UITestFeatureVerifier {
 
         let internet = await InternetConnectivityTest.waitForExtensionResult(timeoutSeconds: 90)
         try? await Task.sleep(nanoseconds: 8_000_000_000)
-        let appInternet = await verifyMainAppHTTPWithRetry(attempts: 4, delaySeconds: 3)
+        let appIPInternet = await verifyMainAppIPHTTPSWithRetry(attempts: 2, delaySeconds: 2)
+        let appInternet = await verifyMainAppHTTPWithRetry(attempts: 3, delaySeconds: 3)
         let stats = TunnelStatisticsStore.load()
         let hasTcpRelay = stats.tcpRelaySessions > 0
         let hasTraffic = stats.bytesDown > 1000 || stats.bytesUp > 200
-        check("internet_probe") { internet && appInternet }
+        check("internet_probe") { internet && appIPInternet && appInternet }
+        if appIPInternet {
+            SharedLogger.shared.logRaw("FEATURE_OK", detail: "main_app_ip_https")
+        } else {
+            SharedLogger.shared.logRaw("FEATURE_FAIL", detail: "main_app_ip_https")
+        }
         if appInternet {
             SharedLogger.shared.logRaw("FEATURE_OK", detail: "main_app_http")
         } else {
@@ -123,14 +129,38 @@ enum UITestFeatureVerifier {
 
     private static func verifyMainAppHTTP() async -> Bool {
         guard let url = URL(string: "https://connectivitycheck.gstatic.com/generate_204") else { return false }
+        return await verifyMainAppURL(url, timeout: 15, failureLabel: "hostname")
+    }
+
+    /// Separates raw packet/TCP forwarding from DNS. Cloudflare's certificate includes the
+    /// 1.1.1.1 IP SAN, so this remains a fully validated HTTPS request without a resolver lookup.
+    private static func verifyMainAppIPHTTPSWithRetry(attempts: Int, delaySeconds: UInt64) async -> Bool {
+        guard let url = URL(string: "https://1.1.1.1/cdn-cgi/trace") else { return false }
+        for attempt in 0..<attempts {
+            if await verifyMainAppURL(url, timeout: 12, failureLabel: "ip_literal") { return true }
+            if attempt + 1 < attempts {
+                try? await Task.sleep(nanoseconds: delaySeconds * 1_000_000_000)
+            }
+        }
+        return false
+    }
+
+    private static func verifyMainAppURL(
+        _ url: URL,
+        timeout: TimeInterval,
+        failureLabel: String
+    ) async -> Bool {
         var request = URLRequest(url: url)
-        request.timeoutInterval = 20
+        request.timeoutInterval = timeout
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse else { return false }
             return (200...399).contains(http.statusCode)
         } catch {
-            SharedLogger.shared.logRaw("MAIN_APP_HTTP_FAIL", detail: error.localizedDescription)
+            SharedLogger.shared.logRaw(
+                "MAIN_APP_HTTP_FAIL",
+                detail: "path=\(failureLabel) reason=\(error.localizedDescription)"
+            )
             return false
         }
     }

@@ -100,6 +100,12 @@ interesting = [
     "PROXY_ONLY_NO_SYSTEM_PROXY",
     "FEATURE_OK secure_dns_test",
     "FEATURE_FAIL secure_dns_test",
+    "FEATURE_OK internet_probe",
+    "FEATURE_OK main_app_ip_https",
+    "FEATURE_OK main_app_http",
+    "FEATURE_FAIL internet_probe",
+    "FEATURE_FAIL main_app_ip_https",
+    "FEATURE_FAIL main_app_http",
 ]
 
 print("--- verification ---")
@@ -119,6 +125,12 @@ if expect == "doh":
     require("SECURE_DNS_TEST_OK", bool(any_sub("SECURE_DNS_TEST_OK")))
     require("SECURE_DNS_DOH_ATTEMPT", bool(any_sub("SECURE_DNS_DOH_ATTEMPT")))
     require("FEATURE_OK secure_dns_test", bool(any_all("FEATURE_OK", "secure_dns_test")))
+    require("FEATURE_OK internet_probe", bool(any_all("FEATURE_OK", "internet_probe")))
+    require("FEATURE_OK main_app_ip_https", bool(any_all("FEATURE_OK", "main_app_ip_https")))
+    require("FEATURE_OK main_app_http", bool(any_all("FEATURE_OK", "main_app_http")))
+    require("no FEATURE_FAIL internet_probe", not any_all("FEATURE_FAIL", "internet_probe"))
+    require("no FEATURE_FAIL main_app_ip_https", not any_all("FEATURE_FAIL", "main_app_ip_https"))
+    require("no FEATURE_FAIL main_app_http", not any_all("FEATURE_FAIL", "main_app_http"))
 elif expect == "proxy-only":
     require("PROXY_ONLY_NO_DEFAULT_ROUTE", bool(any_sub("PROXY_ONLY_NO_DEFAULT_ROUTE")))
     require("PROXY_ONLY_NO_SYSTEM_PROXY", bool(any_sub("PROXY_ONLY_NO_SYSTEM_PROXY")))

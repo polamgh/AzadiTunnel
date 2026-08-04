@@ -646,8 +646,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 }
                 let result = await TunnelDnsForwarder.runTest(
                     socksHost: endpoints.host,
-                    socksPort: endpoints.socksPort,
-                    httpPort: endpoints.httpPort
+                    socksPort: endpoints.socksPort
                 )
                 let text = result.ok ? "ok:\(result.detail)" : "fail:\(result.detail)"
                 completionHandler?(text.data(using: .utf8))

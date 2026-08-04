@@ -139,7 +139,7 @@ final class SharedSettingsStore {
                   var settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
                 return AppSettings()
             }
-            var didMigrate = SharedSettingsMigration.migrate(&settings)
+            let didMigrate = SharedSettingsMigration.migrate(&settings)
             if didMigrate, let encoded = try? JSONEncoder().encode(settings) {
                 defaults.set(encoded, forKey: AppGroupConstants.appSettingsKey)
             }

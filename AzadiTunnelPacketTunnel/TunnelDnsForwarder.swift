@@ -38,7 +38,7 @@ enum TunnelDnsForwarder {
         packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) -> Bool {
         // Claim malformed UDP/53 packets too. Returning false here would hand an unparseable DNS
-        // packet to tun2socks, which is a direct cleartext escape path.
+        // packet to the native packet engine, which would create a direct cleartext escape path.
         guard isDNSDestination(packet) else { return false }
         guard let parsed = parseDnsQuery(packet: packet) else { return true }
         guard let question = parseQuestion(parsed.dnsPayload) else {
@@ -184,64 +184,34 @@ enum TunnelDnsForwarder {
         protocolNumber: NSNumber,
         packetFlow: NEPacketTunnelFlow
     ) {
-        let out = buildUdpResponsePacket(from: packet, dnsPayload: dnsPayload)
+        guard let out = buildUdpResponsePacket(from: packet, dnsPayload: dnsPayload) else {
+            return
+        }
         queue.async {
             packetFlow.writePackets([out], withProtocols: [protocolNumber])
         }
     }
 
-    private static func buildUdpResponsePacket(from query: ParsedQuery, dnsPayload: Data) -> Data {
-        let udpLength = 8 + dnsPayload.count
-        let packetLength = query.ipHeaderLength + udpLength
-        guard packetLength <= Int(UInt16.max) else {
-            return buildUdpResponsePacket(
-                from: query,
-                dnsPayload: SecureDNSWire.errorResponse(for: query.dnsPayload, rcode: 2) ?? Data()
-            )
+    private static func buildUdpResponsePacket(from query: ParsedQuery, dnsPayload: Data) -> Data? {
+        if let response = IPv4UDPResponsePacketBuilder.build(
+            ipHeaderLength: query.ipHeaderLength,
+            sourceIP: query.srcIP,
+            destinationIP: query.dstIP,
+            sourcePort: query.srcPort,
+            destinationPort: query.dstPort,
+            payload: dnsPayload
+        ) {
+            return response
         }
-        var packet = Data(count: packetLength)
-        packet[0] = 0x40 | UInt8(query.ipHeaderLength / 4 & 0x0f)
-        let totalLength = UInt16(packet.count)
-        packet[2] = UInt8(totalLength >> 8)
-        packet[3] = UInt8(totalLength & 0xff)
-        packet[4] = 64
-        packet[8] = 17
-        packet[12] = query.dstIP[0]
-        packet[13] = query.dstIP[1]
-        packet[14] = query.dstIP[2]
-        packet[15] = query.dstIP[3]
-        packet[16] = query.srcIP[0]
-        packet[17] = query.srcIP[1]
-        packet[18] = query.srcIP[2]
-        packet[19] = query.srcIP[3]
-        let ipChecksum = internetChecksum(data: packet, offset: 0, length: query.ipHeaderLength)
-        packet[10] = UInt8(ipChecksum >> 8)
-        packet[11] = UInt8(ipChecksum & 0xff)
-
-        let udpOffset = query.ipHeaderLength
-        packet[udpOffset] = UInt8(query.dstPort >> 8)
-        packet[udpOffset + 1] = UInt8(query.dstPort & 0xff)
-        packet[udpOffset + 2] = UInt8(query.srcPort >> 8)
-        packet[udpOffset + 3] = UInt8(query.srcPort & 0xff)
-        packet[udpOffset + 4] = UInt8(udpLength >> 8)
-        packet[udpOffset + 5] = UInt8(udpLength & 0xff)
-        dnsPayload.withUnsafeBytes { raw in
-            packet.replaceSubrange((udpOffset + 8)..<packet.count, with: raw)
-        }
-        return packet
-    }
-
-    private static func internetChecksum(data: Data, offset: Int, length: Int) -> UInt16 {
-        var sum: UInt32 = 0
-        var index = offset
-        let end = offset + length
-        while index + 1 < end {
-            sum += UInt32(data[index]) << 8 | UInt32(data[index + 1])
-            index += 2
-        }
-        if index < end { sum += UInt32(data[index]) << 8 }
-        while (sum >> 16) != 0 { sum = (sum & 0xffff) + (sum >> 16) }
-        return ~UInt16(sum & 0xffff)
+        let servfail = SecureDNSWire.errorResponse(for: query.dnsPayload, rcode: 2) ?? Data()
+        return IPv4UDPResponsePacketBuilder.build(
+            ipHeaderLength: query.ipHeaderLength,
+            sourceIP: query.srcIP,
+            destinationIP: query.dstIP,
+            sourcePort: query.srcPort,
+            destinationPort: query.dstPort,
+            payload: servfail
+        )
     }
 
     private final class RequestRegistry: @unchecked Sendable {

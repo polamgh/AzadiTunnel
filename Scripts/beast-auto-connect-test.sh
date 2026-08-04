@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Auto + Beast ON connect test (Shiro parity). Expect tunnel up within ~45s on a live device.
+# Auto + Beast ON connect test (dynamic tactics; no static CDN override). Expect tunnel up within
+# ~45s on a live device.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -62,8 +63,11 @@ if shiro:
     if "aggressive=false" in shiro or "beast=false" in shiro:
         print("FAIL: PSIPHON_SHIRO_CONFIG missing beast/aggressive flags")
         sys.exit(1)
-    if "meek_overrides=0" in shiro:
-        print("FAIL: expected FrontedMeek dial overrides")
+    if "meek_overrides=0" not in shiro:
+        print("FAIL: Auto must not receive static CDN dial overrides")
+        sys.exit(1)
+    if "cdn_block=true" in shiro or "disable_tactics=true" in shiro:
+        print("FAIL: Auto must keep dynamic tactics and CDN overrides scoped to explicit CDN")
         sys.exit(1)
 
 if limit and "limits=all" not in limit:

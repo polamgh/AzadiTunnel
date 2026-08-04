@@ -7,18 +7,57 @@ enum FallbackChainController {
         let protocolSelection: AppSettings.ProtocolSelection
         let beast: Bool
         let timeoutSeconds: TimeInterval
+        let conduitMode: AppSettings.ConduitMode?
+
+        init(
+            transport: FallbackStep,
+            protocolSelection: AppSettings.ProtocolSelection,
+            beast: Bool,
+            timeoutSeconds: TimeInterval,
+            conduitMode: AppSettings.ConduitMode? = nil
+        ) {
+            self.transport = transport
+            self.protocolSelection = protocolSelection
+            self.beast = beast
+            self.timeoutSeconds = timeoutSeconds
+            self.conduitMode = conduitMode
+        }
     }
 
-    static func steps(for selection: AppSettings.ProtocolSelection) -> [Step] {
-        let settings = SharedSettingsStore.shared.appSettings
-        let cdn = Step(transport: .cdn, protocolSelection: .cdnFronting, beast: true, timeoutSeconds: settings.fallbackTimeoutCDN)
-        let auto = Step(transport: .autoBeast, protocolSelection: .auto, beast: true, timeoutSeconds: settings.fallbackTimeoutAutoBeast)
-        let direct = Step(transport: .direct, protocolSelection: .direct, beast: false, timeoutSeconds: settings.fallbackTimeoutDirect)
-        switch selection {
-        case .cdnFronting: return [cdn, auto, direct]
-        case .auto: return [cdn, direct]
-        case .direct: return [direct]
-        case .conduit: return []
+    static func steps(
+        for selection: AppSettings.ProtocolSelection,
+        settings: AppSettings? = nil
+    ) -> [Step] {
+        let effectiveSettings = settings ?? SharedSettingsStore.shared.appSettings
+        guard let policySelection = AdaptiveTransportPolicy.selection(for: selection.rawValue) else {
+            return []
+        }
+        let candidates = AdaptiveTransportPolicy.candidates(
+            for: policySelection,
+            includePublicConduit: SharedSettingsStore.shared.conduitConnectAllowed
+        )
+        return candidates.map { candidate in
+            let timeout: TimeInterval
+            switch candidate.transport {
+            case .cdn:
+                timeout = effectiveSettings.fallbackTimeoutCDN
+            case .autoBeast:
+                timeout = effectiveSettings.fallbackTimeoutAutoBeast
+            case .direct:
+                timeout = effectiveSettings.fallbackTimeoutDirect
+            case .conduitPublic:
+                timeout = max(
+                    TimeInterval(effectiveSettings.conduitTimeoutSeconds),
+                    effectiveSettings.fallbackTimeoutDirect
+                )
+            }
+            return Step(
+                transport: candidate.transport,
+                protocolSelection: AppSettings.ProtocolSelection(rawValue: candidate.selection.rawValue) ?? .auto,
+                beast: candidate.beast,
+                timeoutSeconds: timeout,
+                conduitMode: candidate.transport == .conduitPublic ? .publicOnly : nil
+            )
         }
     }
 
@@ -26,7 +65,7 @@ enum FallbackChainController {
         let settings = SharedSettingsStore.shared.appSettings
         guard settings.smartFallbackChainEnabled else { return false }
         guard selection != .conduit else { return false }
-        return !steps(for: selection).isEmpty
+        return !steps(for: selection, settings: settings).isEmpty
     }
 
     static func connectWithChain(
@@ -39,18 +78,16 @@ enum FallbackChainController {
         if !force, !shouldUseChain(for: original.protocolSelection) {
             return false
         }
-        let chainSteps = steps(for: original.protocolSelection)
+        let chainSteps = steps(for: original.protocolSelection, settings: original)
         guard !chainSteps.isEmpty else { return false }
         var state = FallbackChainState(isActive: true)
-        var winningSettings: AppSettings?
         ConnectionDiagnosticsStore.saveFallback(state)
         SharedLogger.shared.logRaw("FALLBACK_CHAIN_STARTED", detail: "steps=\(chainSteps.count)")
         defer {
-            if let winningSettings {
-                SharedSettingsStore.shared.updateAppSettings(winningSettings, logKey: "best_server_saved")
-            } else {
-                SharedSettingsStore.shared.updateAppSettings(original, logKey: "fallback_restore_settings")
-            }
+            // A fallback trial is runtime state, not a replacement for the user's explicit choice.
+            // Restore the original settings after every chain, while the active tunnel continues
+            // using the trial already handed to the extension.
+            SharedSettingsStore.shared.updateAppSettings(original, logKey: "fallback_restore_settings")
             var done = ConnectionDiagnosticsStore.loadFallback()
             done.isActive = false
             ConnectionDiagnosticsStore.saveFallback(done)
@@ -64,6 +101,10 @@ enum FallbackChainController {
             var trial = original
             trial.protocolSelection = step.protocolSelection
             trial.beastModeEnabled = step.beast
+            if let conduitMode = step.conduitMode {
+                trial.conduitMode = conduitMode
+                trial.conduitFallbackToPublic = true
+            }
             SharedSettingsStore.shared.updateAppSettings(trial, logKey: "fallback_trial_\(step.transport.rawValue)")
             try? SharedSettingsStore.shared.recomposeEffectiveConfig()
 
@@ -80,7 +121,6 @@ enum FallbackChainController {
                 state.succeededProtocol = protocolRaw
                 state.currentStep = step.transport
                 ConnectionDiagnosticsStore.saveFallback(state)
-                winningSettings = trial
                 SharedLogger.shared.logRaw(
                     "FALLBACK_SUCCESS",
                     detail: "transport=\(step.transport.rawValue) protocol=\(protocolRaw)"
@@ -88,7 +128,12 @@ enum FallbackChainController {
                 if runDiagnosticsOnSuccess {
                     await vpn.runPostConnectDiagnostics()
                 }
-                persistBestServerSelection(transport: step.transport, tunnelProtocol: protocolRaw)
+                let networkSnapshot = await IOSNetworkProfileProvider.current()
+                persistBestServerSelection(
+                    transport: step.transport,
+                    tunnelProtocol: protocolRaw,
+                    networkSnapshot: networkSnapshot
+                )
                 return true
             }
 
@@ -115,7 +160,11 @@ enum FallbackChainController {
         await InternetConnectivityTest.waitForConnectedTunnel(timeoutSeconds: timeout)
     }
 
-    private static func persistBestServerSelection(transport: FallbackStep, tunnelProtocol: String) {
+    private static func persistBestServerSelection(
+        transport: FallbackStep,
+        tunnelProtocol: String,
+        networkSnapshot: NetworkPathSnapshot
+    ) {
         let quality = ConnectionDiagnosticsStore.loadQuality()
         let latency = quality?.latencyMs ?? -1
         let selection = BestServerSelection(
@@ -126,7 +175,7 @@ enum FallbackChainController {
             cdnSNI: quality?.cdnSNI ?? "",
             selectedAt: Date()
         )
-        ConnectionDiagnosticsStore.saveBestServer(selection)
+        ConnectionDiagnosticsStore.saveBestServer(selection, for: networkSnapshot)
         var detail = "transport=\(transport.rawValue) protocol=\(tunnelProtocol)"
         if latency >= 0 { detail += " latency_ms=\(latency)" }
         if !selection.cdnEdgeIP.isEmpty { detail += " fronting_ip=\(selection.cdnEdgeIP)" }

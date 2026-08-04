@@ -20,7 +20,8 @@ enum NoInternetRecoveryController {
 
         let original = settings
         let tunnelProtocol = TunnelStatisticsStore.load().connectedTunnelProtocol
-        let plans = buildPlans(original: original)
+        let networkSnapshot = await IOSNetworkProfileProvider.current()
+        let plans = buildPlans(original: original, networkSnapshot: networkSnapshot)
         guard !plans.isEmpty else { return false }
 
         var state = SmartRecoveryState(isActive: true, totalAttempts: plans.count)
@@ -30,21 +31,19 @@ enum NoInternetRecoveryController {
             detail: "phases=\(plans.count) protocol_selection=\(original.protocolSelection.rawValue) tunnel=\(tunnelProtocol)"
         )
 
-        var winningSettings: AppSettings?
         defer {
             state.isActive = false
-            if winningSettings == nil {
-                state.exhausted = true
-            }
+            state.exhausted = state.succeededPhase == nil
             ConnectionDiagnosticsStore.saveSmartRecovery(state)
-            if let winningSettings {
-                SharedSettingsStore.shared.updateAppSettings(winningSettings, logKey: "smart_recovery_saved")
+            // Recovery trials are scoped to this run. Never turn a successful trial into a global
+            // manual preference that would be applied on a different network later.
+            SharedSettingsStore.shared.updateAppSettings(original, logKey: "smart_recovery_restore")
+            if state.succeededPhase != nil {
                 SharedLogger.shared.logRaw(
                     "SMART_RECOVERY_SUCCESS",
                     detail: "phase=\(state.succeededPhase?.rawValue ?? "unknown")"
                 )
             } else {
-                SharedSettingsStore.shared.updateAppSettings(original, logKey: "smart_recovery_restore")
                 SharedLogger.shared.logRaw("SMART_RECOVERY_FAILED", detail: "all_phases_exhausted")
             }
         }
@@ -63,15 +62,14 @@ enum NoInternetRecoveryController {
                 detail: "phase=\(plan.phase.rawValue) step=\(index + 1)/\(plans.count) \(plan.detail)"
             )
 
-            if let won = await runPhase(plan: plan, vpn: vpn, baseline: original) {
-                winningSettings = won
+            if await runPhase(plan: plan, vpn: vpn, baseline: original) != nil {
                 state.succeededPhase = plan.phase
                 state.currentPhase = nil
                 await vpn.runPostConnectDiagnostics()
                 if SharedSettingsStore.shared.lastInternetTestOK {
                     return true
                 }
-                winningSettings = nil
+                state.succeededPhase = nil
                 state.lastFailureReason = "internet_probe_failed_after_phase"
                 await vpn.disconnect()
                 try? await TaskSleep.seconds(1)
@@ -90,10 +88,13 @@ enum NoInternetRecoveryController {
         return false
     }
 
-    private static func buildPlans(original: AppSettings) -> [PhasePlan] {
+    private static func buildPlans(
+        original: AppSettings,
+        networkSnapshot: NetworkPathSnapshot
+    ) -> [PhasePlan] {
         var plans: [PhasePlan] = []
 
-        if let best = ConnectionDiagnosticsStore.loadBestServer(),
+        if let best = ConnectionDiagnosticsStore.loadBestServer(for: networkSnapshot),
            let mutated = settingsApplyingBestServer(from: original, best: best),
            mutated != original {
             plans.append(PhasePlan(
@@ -228,6 +229,11 @@ enum NoInternetRecoveryController {
             trial.beastModeEnabled = true
         case FallbackStep.direct.rawValue:
             trial.protocolSelection = .direct
+            trial.beastModeEnabled = false
+        case FallbackStep.conduitPublic.rawValue:
+            trial.protocolSelection = .conduit
+            trial.conduitMode = .publicOnly
+            trial.conduitFallbackToPublic = true
             trial.beastModeEnabled = false
         default:
             return nil

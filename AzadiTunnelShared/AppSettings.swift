@@ -25,7 +25,8 @@ struct AppSettings: Codable, Equatable {
     /// Shiro always sets `FrontedMeekCDNScanUseBuiltInSpec` true; toggle disables built-in scan spec.
     var cdnFrontingUseBuiltInScan: Bool = true
     var beastModeEnabled: Bool = true
-    /// When enabled (and not Conduit), connect tries fallback chains: Auto → CDN then Direct; CDN mode → CDN, Auto+Beast, Direct.
+    /// When enabled, Auto tries Auto+Beast/Tactics → CDN fronting → Direct, with Public Conduit last
+    /// when the configured Psiphon data permits it. Explicit Direct remains Direct only.
     var smartFallbackChainEnabled: Bool = true
     /// When the tunnel connects but the internet probe fails, disconnect and try fallback transports or another server.
     var autoRetryOnNoInternet: Bool = true

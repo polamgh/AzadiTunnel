@@ -1,6 +1,6 @@
 import Foundation
 
-/// Shiro Khorshid shared tunnel-core fields (DNS, diagnostics, beast, tactics for direct).
+/// Shiro Khorshid shared tunnel-core fields (DNS, diagnostics, beast, and dynamic tactics).
 enum PsiphonShiroTunnelConfig {
     private static let dnsServers = ["1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4"]
 
@@ -16,11 +16,10 @@ enum PsiphonShiroTunnelConfig {
             dict.removeValue(forKey: "NetworkLatencyMultiplierLambda")
         }
 
-        if settings.protocolSelection == .direct {
-            dict["DisableTactics"] = true
-        } else if settings.protocolSelection != .conduit && settings.protocolSelection != .cdnFronting {
-            dict.removeValue(forKey: "DisableTactics")
-        }
+        // Tactics deliver dynamic server/fronting data and must stay available for Auto, CDN, and
+        // Direct attempts. The app has no user-facing "disable tactics" choice, so do not carry a
+        // stale hard-coded disable flag into any adaptive attempt.
+        dict.removeValue(forKey: "DisableTactics")
 
         // Shiro VPN build: beast sets AggressiveEstablishment only (no EstablishTunnelTimeoutSeconds).
         if settings.beastModeEnabled {

@@ -25,9 +25,13 @@ enum PsiphonShiroCDNFrontingConfig {
     private static let bundledBaseName = "cdn-fronting"
     private static let bundledLocalName = "cdn-fronting.local"
 
-    /// Applies CDN fronting when Shiro enables it: auto, direct, or cdnFronting.
+    /// Applies static CDN fronting hints only for an explicit CDN-fronting attempt.
+    ///
+    /// Auto and Direct must leave Psiphon's dynamic tactics/server selection in control. Applying
+    /// these overrides to either mode would force a static edge/SNI at probability 1.0 and make
+    /// the adaptive fallback less useful on networks whose working edge changes.
     static func apply(to dict: inout [String: Any], settings: AppSettings) {
-        guard enablesCdnFrontingBlock(settings.protocolSelection) else {
+        guard AdaptiveTransportPolicy.usesStaticCDNOverrides(for: settings.protocolSelection.rawValue) else {
             removeCdnKeys(from: &dict)
             return
         }
@@ -49,22 +53,16 @@ enum PsiphonShiroCDNFrontingConfig {
             dict.removeValue(forKey: "FrontedMeekCDNScanSpec")
         }
 
-        if settings.protocolSelection == .cdnFronting {
-            dict["DisableTactics"] = true
-        }
+        // CDN fronting still benefits from dynamic Psiphon tactics and signed server data.
+        dict.removeValue(forKey: "DisableTactics")
     }
 
     static func enablesCdnFrontingBlock(_ selection: AppSettings.ProtocolSelection) -> Bool {
-        switch selection {
-        case .auto, .direct, .cdnFronting:
-            return true
-        case .conduit:
-            return false
-        }
+        AdaptiveTransportPolicy.usesStaticCDNOverrides(for: selection.rawValue)
     }
 
     static func logSummary(settings: AppSettings, composedJSON: String) -> String {
-        guard settings.protocolSelection == .cdnFronting,
+        guard enablesCdnFrontingBlock(settings.protocolSelection),
               let data = composedJSON.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return "enabled=false"

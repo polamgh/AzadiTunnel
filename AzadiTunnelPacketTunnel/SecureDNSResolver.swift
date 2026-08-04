@@ -35,7 +35,7 @@ enum SecureDNSResolver {
             }
             let handle = await coalescer.acquire(for: key) {
                 let deadline = SecureDNSDeadline(after: SecureDNSFailoverPolicy.totalTimeout)
-                let result = try await limiter.withPermit(deadline: deadline) {
+                let result = try await self.limiter.withPermit(deadline: deadline) {
                     try await operation(deadline)
                 }
                 if let lifetime = result.lifetime {

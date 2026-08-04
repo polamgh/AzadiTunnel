@@ -5,11 +5,11 @@ import Foundation
 struct SecureDNSDeadline: Equatable, Sendable {
     let uptime: TimeInterval
 
-    init(after interval: TimeInterval, now: TimeInterval = SecureDNSMonotonicClock.now) {
+    nonisolated init(after interval: TimeInterval, now: TimeInterval = SecureDNSMonotonicClock.now) {
         uptime = now + max(0, interval)
     }
 
-    var remaining: TimeInterval {
+    nonisolated var remaining: TimeInterval {
         max(0, uptime - SecureDNSMonotonicClock.now)
     }
 }

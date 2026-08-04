@@ -35,3 +35,6 @@ Tooling/test-logs/
 
 # Xcode build artifacts
 build/
+
+# Swift Package Manager build artifacts
+.build/

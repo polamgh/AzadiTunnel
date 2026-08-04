@@ -142,7 +142,7 @@ enum TunnelDnsForwarder {
         socksPort: Int,
         httpPort: Int
     ) async -> (ok: Bool, detail: String) {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         SharedLogger.shared.log(
             .secureDnsTestStarted,
             detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue)"

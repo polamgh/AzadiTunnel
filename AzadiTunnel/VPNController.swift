@@ -27,11 +27,11 @@ final class VPNController: ObservableObject {
     private var manager: NETunnelProviderManager?
     private let providerBundleID = "com.polamgh.ali.AzadiTunnel.PacketTunnel"
     private var reconnectTask: Task<Void, Never>?
+    private var recoveryTask: Task<Bool, Never>?
     /// User tapped Disconnect — keep UI on Disconnected while iOS tears down the tunnel.
     private var optimisticDisconnect = false
     /// Skip haptics until the first system status sync (avoids feedback on cold launch).
     private var statusHapticsEnabled = false
-    private var isRecoveringFromNoInternet = false
 
     init() {
         Task { await refreshStatusFromSystem() }
@@ -77,7 +77,35 @@ final class VPNController: ObservableObject {
         statistics = TunnelStatisticsStore.load()
     }
 
-    func connect(skipFallbackChain: Bool = false) async {
+    func connect(
+        skipFallbackChain: Bool = false,
+        recoverySessionID: UUID? = nil
+    ) async {
+        let gate = RecoverySessionGate.shared
+        if let recoverySessionID {
+            guard gate.owns(recoverySessionID) else {
+                SharedLogger.shared.logRaw("CONNECT_BLOCKED_RECOVERY", detail: "reason=invalid_session")
+                return
+            }
+            guard !gate.isCancellationRequested(for: recoverySessionID) else {
+                SharedLogger.shared.logRaw("CONNECT_BLOCKED_RECOVERY", detail: "reason=session_cancelled")
+                return
+            }
+        } else if gate.activeSessionID != nil {
+            SharedLogger.shared.logRaw("CONNECT_BLOCKED_RECOVERY", detail: "reason=overlapping_recovery")
+            return
+        }
+
+        if recoverySessionID == nil {
+            SharedSettingsStore.shared.discardExpiredRecoveryTrialSettings()
+            if SharedSettingsStore.shared.recoveryTrialSettings != nil {
+                // A verified recovery winner is session-scoped. A fresh user
+                // connect starts from the durable preference, never from a
+                // candidate left by an earlier process.
+                SharedSettingsStore.shared.clearRecoveryTrialSettings()
+            }
+        }
+
         lastError = nil
         banner = .none
 
@@ -105,7 +133,7 @@ final class VPNController: ObservableObject {
             return
         }
 
-        if SharedSettingsStore.shared.appSettings.protocolSelection == .conduit,
+        if SharedSettingsStore.shared.effectiveAppSettings.protocolSelection == .conduit,
            !SharedSettingsStore.shared.conduitConnectAllowed {
             let readiness = SharedSettingsStore.shared.conduitDistributorReadiness
             SharedLogger.shared.logRaw("CONDUIT_BLOCKED", detail: "missing_distributor_keys \(readiness.logDetail)")
@@ -143,7 +171,7 @@ final class VPNController: ObservableObject {
 
     /// Refresh the Iran CIDR list + resolve bypass domains into App Group cache (no-op if disabled).
     private func ensureBypassCacheReady() async {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         guard settings.bypassIranIPsEnabled else { return }
         _ = await IranBypassListService.refresh(force: false)
         let domains = BypassRoutes.tokenize(settings.bypassDomains)
@@ -172,7 +200,7 @@ final class VPNController: ObservableObject {
         SharedSettingsStore.shared.vpnStatus = .connecting
         status = .connecting
         statusMessage = "Connecting…"
-        if SharedSettingsStore.shared.appSettings.protocolSelection == .conduit {
+        if SharedSettingsStore.shared.effectiveAppSettings.protocolSelection == .conduit {
             TunnelStatisticsStore.clearConduitStatus()
             TunnelStatisticsStore.seedConduitConnecting(missingDistributorKeys: false)
             refreshStatistics()
@@ -231,8 +259,8 @@ final class VPNController: ObservableObject {
         SharedLogger.shared.log(.psiphonConnectFailed, detail: "reason=\(error.localizedDescription)")
     }
 
-    func runPostConnectDiagnostics() async {
-        await handleConnectedSideEffects()
+    func runPostConnectDiagnostics(alreadyVerified: Bool = false) async {
+        await handleConnectedSideEffects(alreadyVerified: alreadyVerified)
     }
 
     func setFallbackFailureMessage(_ message: String) {
@@ -243,8 +271,13 @@ final class VPNController: ObservableObject {
         SharedSettingsStore.shared.vpnStatus = .error
     }
 
-    func disconnect() async {
+    func disconnect(cancelRecovery: Bool = true) async {
         reconnectTask?.cancel()
+        if cancelRecovery {
+            RecoverySessionGate.shared.cancelActiveSession()
+            recoveryTask?.cancel()
+            recoveryTask = nil
+        }
         lastError = nil
         banner = .none
         SharedLogger.shared.log(.vpnDisconnectRequested)
@@ -273,15 +306,22 @@ final class VPNController: ObservableObject {
                 settings: SharedSettingsStore.shared.appSettings
             )
         }
-        applyDisconnectedState()
+        if cancelRecovery {
+            // Stop has been requested above. Now discard the runtime winner and
+            // recompose the durable user settings for the next tunnel session.
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
+        }
+        // Recovery's internal stop is only a NetworkExtension state change;
+        // it must not rewrite the durable baseline while a trial is active.
+        applyDisconnectedState(preserveRecoveryBaseline: !cancelRecovery)
     }
 
-    private func applyDisconnectedState() {
+    private func applyDisconnectedState(preserveRecoveryBaseline: Bool = false) {
         let previous = status
         TunnelStatisticsStore.markDisconnected()
         TunnelStatisticsStore.clearPublicIP()
         var appSettings = SharedSettingsStore.shared.appSettings
-        if appSettings.conduitFallbackToPublic {
+        if !preserveRecoveryBaseline, appSettings.conduitFallbackToPublic {
             appSettings.conduitFallbackToPublic = false
             SharedSettingsStore.shared.updateAppSettings(appSettings, logKey: "conduit_fallback_reset")
         }
@@ -293,10 +333,22 @@ final class VPNController: ObservableObject {
         playVPNStatusHapticIfNeeded(from: previous, to: .disconnected)
     }
 
-    func handleConnectedSideEffects() async {
+    func handleConnectedSideEffects(alreadyVerified: Bool = false) async {
         refreshStatistics()
-        let proxyOnly = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
-        let ok = await InternetConnectivityTest.waitForExtensionResult()
+        let proxyOnly = SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled
+        if alreadyVerified {
+            guard SharedSettingsStore.shared.vpnStatus == .connected else { return }
+            guard SharedSettingsStore.shared.lastInternetTestOK else {
+                SharedLogger.shared.logRaw("POST_CONNECT_DIAGNOSTICS_SKIPPED", detail: "reason=probe_state_changed")
+                return
+            }
+        }
+        let ok: Bool
+        if alreadyVerified {
+            ok = true
+        } else {
+            ok = await InternetConnectivityTest.waitForExtensionResult()
+        }
         if ok {
             banner = .none
             if !proxyOnly {
@@ -317,11 +369,22 @@ final class VPNController: ObservableObject {
                 : "VPN is up but internet check failed. See Logs for INTERNET_TEST_* and PSIPHON_PROXY_MODE."
 
             let settings = SharedSettingsStore.shared.appSettings
-            if settings.autoRetryOnNoInternet, !isRecoveringFromNoInternet {
-                isRecoveringFromNoInternet = true
-                let recovered = await NoInternetRecoveryController.recover(vpn: self)
-                isRecoveringFromNoInternet = false
-                if recovered { return }
+            if settings.autoRetryOnNoInternet {
+                guard recoveryTask == nil else {
+                    SharedLogger.shared.logRaw("SMART_RECOVERY_SKIPPED", detail: "reason=duplicate_side_effects_callback")
+                    return
+                }
+                let task = Task { @MainActor [weak self] in
+                    guard let self else { return false }
+                    return await NoInternetRecoveryController.recover(vpn: self)
+                }
+                recoveryTask = task
+                _ = await task.value
+                recoveryTask = nil
+                refreshStatistics()
+                // Recovery owns the only reconnect loop. Do not start the
+                // background auto-reconnect loop after it exhausts/cancels.
+                return
             }
         }
         refreshStatistics()
@@ -482,7 +545,7 @@ final class VPNController: ObservableObject {
             }
             let previous = status
             status = .connected
-            statusMessage = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+            statusMessage = SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled
                 ? L10n.t(.proxyOnlyStatusConnected)
                 : "Connected"
             if previous != .connected {

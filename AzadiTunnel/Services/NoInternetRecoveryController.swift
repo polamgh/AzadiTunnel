@@ -1,218 +1,290 @@
 import Foundation
 
-/// Multi-phase recovery when the tunnel is up but the connectivity probe fails.
+/// Bounded recovery when the tunnel is up but the connectivity probe fails.
 @MainActor
 enum NoInternetRecoveryController {
-    private struct PhasePlan {
+    struct AttemptPlan {
         let phase: SmartRecoveryPhase
         let detail: String
-        let mutate: (inout AppSettings) -> Void
-        let useChain: Bool
-        let reconnects: Int
+        let fallbackStep: FallbackStep?
+        let attempt: RecoveryAttemptRunner.Attempt
     }
 
-    private static let egressPriority = ["GB", "DE", "NL", "US", "FR", "CA", "SG", "JP", "SE", "AU"]
-    private static let maxEgressRotations = 6
+    static func recover(
+        vpn: VPNController,
+        budget: RecoveryBudget? = nil
+    ) async -> Bool {
+        let original = SharedSettingsStore.shared.appSettings
+        guard original.autoRetryOnNoInternet else { return false }
 
-    static func recover(vpn: VPNController) async -> Bool {
-        let settings = SharedSettingsStore.shared.appSettings
-        guard settings.autoRetryOnNoInternet else { return false }
-
-        let original = settings
-        let tunnelProtocol = TunnelStatisticsStore.load().connectedTunnelProtocol
         let networkSnapshot = await IOSNetworkProfileProvider.current()
-        let plans = buildPlans(original: original, networkSnapshot: networkSnapshot)
+        let best = ConnectionDiagnosticsStore.loadBestServer(for: networkSnapshot)
+        let telemetryRegion = TunnelStatisticsStore.load().connectedServerRegion
+        let plans = buildAttemptPlans(
+            original: original,
+            best: best,
+            telemetryRegion: telemetryRegion
+        )
         guard !plans.isEmpty else { return false }
 
-        var state = SmartRecoveryState(isActive: true, totalAttempts: plans.count)
+        let gate = RecoverySessionGate.shared
+        guard let session = gate.acquire() else {
+            SharedLogger.shared.logRaw("SMART_RECOVERY_SKIPPED", detail: "reason=overlapping_recovery")
+            return false
+        }
+
+        let runBudget = budget ?? RecoveryBudget()
+        var state = SmartRecoveryState(
+            isActive: true,
+            totalAttempts: min(plans.count, RecoveryTimingDefaults.maxRecoveryAttempts)
+        )
         ConnectionDiagnosticsStore.saveSmartRecovery(state)
         SharedLogger.shared.logRaw(
             "SMART_RECOVERY_STARTED",
-            detail: "phases=\(plans.count) protocol_selection=\(original.protocolSelection.rawValue) tunnel=\(tunnelProtocol)"
+            detail: "phases=\(state.totalAttempts) budget=\(Int(runBudget.remaining)) protocol_selection=\(original.protocolSelection.rawValue)"
         )
 
         defer {
+            // Commit the terminal snapshot exactly once. Reloading here would
+            // discard state.exhausted/currentPhase updates made by this run.
             state.isActive = false
-            state.exhausted = state.succeededPhase == nil
             ConnectionDiagnosticsStore.saveSmartRecovery(state)
-            // Recovery trials are scoped to this run. Never turn a successful trial into a global
-            // manual preference that would be applied on a different network later.
-            SharedSettingsStore.shared.updateAppSettings(original, logKey: "smart_recovery_restore")
-            if state.succeededPhase != nil {
-                SharedLogger.shared.logRaw(
-                    "SMART_RECOVERY_SUCCESS",
-                    detail: "phase=\(state.succeededPhase?.rawValue ?? "unknown")"
+            gate.release(session)
+        }
+
+        let runner = RecoveryAttemptRunner(operations: .init(
+            applyTrial: { trial in
+                SharedSettingsStore.shared.applyRecoveryTrialSettings(trial)
+            },
+            restoreBaseline: { _ in
+                SharedSettingsStore.shared.clearRecoveryTrialSettings()
+            },
+            disconnect: {
+                await vpn.disconnect(cancelRecovery: false)
+            },
+            connect: {
+                await vpn.connect(skipFallbackChain: true, recoverySessionID: session)
+            },
+            verify: { _, timeout, budget in
+                await InternetConnectivityTest.waitForConnectedTunnel(
+                    timeoutSeconds: timeout,
+                    budget: budget,
+                    clock: budget.clock,
+                    isCancellationRequested: {
+                        gate.isCancellationRequested(for: session)
+                    }
                 )
-            } else {
-                SharedLogger.shared.logRaw("SMART_RECOVERY_FAILED", detail: "all_phases_exhausted")
-            }
-        }
-
-        await vpn.disconnect()
-        try? await TaskSleep.seconds(1)
-
-        for (index, plan) in plans.enumerated() {
-            state.attemptIndex = index + 1
-            state.currentPhase = plan.phase
-            state.lastFailureReason = ""
-            ConnectionDiagnosticsStore.saveSmartRecovery(state)
-
-            SharedLogger.shared.logRaw(
-                "SMART_RECOVERY_PHASE",
-                detail: "phase=\(plan.phase.rawValue) step=\(index + 1)/\(plans.count) \(plan.detail)"
-            )
-
-            if await runPhase(plan: plan, vpn: vpn, baseline: original) != nil {
-                state.succeededPhase = plan.phase
-                state.currentPhase = nil
-                await vpn.runPostConnectDiagnostics()
-                if SharedSettingsStore.shared.lastInternetTestOK {
-                    return true
+            },
+            persistWinner: { trial in
+                // The candidate stays in the runtime overlay for the tunnel's
+                // current session. Durable AppSettings is never changed by a
+                // recovery trial; winner metadata is recorded separately.
+                guard let plan = plans.first(where: { $0.attempt.settings == trial }),
+                      let transport = plan.fallbackStep ?? fallbackStep(for: trial) else {
+                    return
                 }
-                state.succeededPhase = nil
-                state.lastFailureReason = "internet_probe_failed_after_phase"
-                await vpn.disconnect()
-                try? await TaskSleep.seconds(1)
-                continue
+                FallbackChainController.persistBestServerSelection(
+                    transport: transport,
+                    tunnelProtocol: TunnelStatisticsStore.load().connectedTunnelProtocol,
+                    networkSnapshot: networkSnapshot
+                )
+            },
+            isCancellationRequested: {
+                gate.isCancellationRequested(for: session)
+            },
+            attemptStarted: { index, attempt in
+                guard let plan = plans.first(where: { $0.attempt.id == attempt.id }) else { return }
+                state.attemptIndex = index
+                state.currentPhase = plan.phase
+                state.lastFailureReason = ""
+                ConnectionDiagnosticsStore.saveSmartRecovery(state)
+                SharedLogger.shared.logRaw(
+                    "SMART_RECOVERY_PHASE",
+                    detail: "phase=\(plan.phase.rawValue) step=\(index)/\(state.totalAttempts) \(plan.detail) remaining=\(Int(runBudget.remaining))"
+                )
+            },
+            attemptFinished: { _, attempt, verified in
+                guard let plan = plans.first(where: { $0.attempt.id == attempt.id }) else { return }
+                if verified {
+                    state.succeededPhase = plan.phase
+                    state.currentPhase = nil
+                } else {
+                    state.lastFailureReason = vpn.lastError ?? "timeout_or_no_tunnel"
+                    SharedLogger.shared.logRaw(
+                        "SMART_RECOVERY_PHASE_FAILED",
+                        detail: "phase=\(plan.phase.rawValue) reason=\(state.lastFailureReason)"
+                    )
+                }
+                ConnectionDiagnosticsStore.saveSmartRecovery(state)
             }
+        ))
 
-            state.lastFailureReason = vpn.lastError ?? "phase_failed"
+        let result = await runner.run(
+            attempts: plans.map(\.attempt),
+            baseline: original,
+            budget: runBudget,
+            maxAttempts: RecoveryTimingDefaults.maxRecoveryAttempts
+        )
+
+        switch result {
+        case .succeeded:
+            state.currentPhase = nil
             SharedLogger.shared.logRaw(
-                "SMART_RECOVERY_PHASE_FAILED",
-                detail: "phase=\(plan.phase.rawValue) reason=\(state.lastFailureReason)"
+                "SMART_RECOVERY_SUCCESS",
+                detail: "phase=\(state.succeededPhase?.rawValue ?? "unknown")"
             )
-            await vpn.disconnect()
-            try? await TaskSleep.seconds(1)
+            await vpn.runPostConnectDiagnostics(alreadyVerified: true)
+            return true
+        case .cancelled:
+            state.currentPhase = nil
+            state.lastFailureReason = "cancelled"
+            SharedLogger.shared.logRaw("SMART_RECOVERY_CANCELLED", detail: "remaining=\(Int(runBudget.remaining))")
+            return false
+        case .exhausted:
+            state.exhausted = true
+            state.currentPhase = nil
+            SharedLogger.shared.logRaw("SMART_RECOVERY_FAILED", detail: "all_phases_exhausted")
+            return false
         }
-
-        return false
     }
 
-    private static func buildPlans(
-        original: AppSettings,
-        networkSnapshot: NetworkPathSnapshot
-    ) -> [PhasePlan] {
-        var plans: [PhasePlan] = []
+    /// Egress candidates must come from a saved successful selection or the
+    /// latest observed server region. There is intentionally no country-priority
+    /// list: a region with no profile/telemetry is not a recovery trial.
+    static func egressRegionsToTry(
+        current: String,
+        best: BestServerSelection?,
+        telemetryRegion: String?
+    ) -> [String] {
+        let currentRegion = normalizedRegion(current)
+        var candidates: [String] = []
 
-        if let best = ConnectionDiagnosticsStore.loadBestServer(for: networkSnapshot),
-           let mutated = settingsApplyingBestServer(from: original, best: best),
-           mutated != original {
-            plans.append(PhasePlan(
-                phase: .savedBest,
-                detail: "transport=\(best.transport)",
-                mutate: { settings in
-                    if let applied = settingsApplyingBestServer(from: original, best: best) {
-                        settings = applied
-                    }
-                },
-                useChain: false,
-                reconnects: 1
+        func append(_ raw: String?) {
+            guard let normalized = normalizedRegion(raw),
+                  normalized != currentRegion,
+                  !candidates.contains(normalized) else { return }
+            candidates.append(normalized)
+        }
+
+        append(best?.egressRegion)
+        append(telemetryRegion)
+        return Array(candidates.prefix(RecoveryTimingDefaults.maxEgressCandidates))
+    }
+
+    static func buildAttemptPlans(
+        original: AppSettings,
+        best: BestServerSelection?,
+        telemetryRegion: String?
+    ) -> [AttemptPlan] {
+        var plans: [AttemptPlan] = []
+
+        func append(
+            phase: SmartRecoveryPhase,
+            detail: String,
+            settings: AppSettings,
+            fallbackStep: FallbackStep? = nil,
+            timeoutSeconds: TimeInterval? = nil
+        ) {
+            guard !plans.contains(where: { $0.attempt.settings == settings }) else { return }
+            let id = "\(phase.rawValue)#\(plans.count)"
+            plans.append(AttemptPlan(
+                phase: phase,
+                detail: detail,
+                fallbackStep: fallbackStep,
+                attempt: RecoveryAttemptRunner.Attempt(
+                    id: id,
+                    settings: settings,
+                    timeoutSeconds: timeoutSeconds ?? settings.fallbackTimeoutDirect
+                )
             ))
         }
 
-        if original.protocolSelection != .conduit {
-            plans.append(PhasePlan(
-                phase: .transportChain,
-                detail: "forced_fallback_chain",
-                mutate: { _ in },
-                useChain: true,
-                reconnects: 0
-            ))
+        if let best,
+           let mutated = settingsApplyingBestServer(from: original, best: best),
+           mutated != original {
+            append(
+                phase: .savedBest,
+                detail: "transport=\(best.transport) egress=\(best.egressRegion ?? "auto")",
+                settings: mutated
+            )
         }
 
         if !original.egressRegion.isEmpty {
-            plans.append(PhasePlan(
-                phase: .clearEgress,
-                detail: "egress=auto",
-                mutate: { $0.egressRegion = "" },
-                useChain: original.protocolSelection != .conduit,
-                reconnects: original.protocolSelection == .conduit ? 2 : 0
-            ))
+            var cleared = original
+            cleared.egressRegion = ""
+            append(phase: .clearEgress, detail: "egress=auto", settings: cleared)
         }
 
-        for region in egressRegionsToTry(current: original.egressRegion) {
-            plans.append(PhasePlan(
-                phase: .egressRegion,
-                detail: "egress=\(region)",
-                mutate: { $0.egressRegion = region },
-                useChain: original.protocolSelection != .conduit,
-                reconnects: original.protocolSelection == .conduit ? 2 : 0
-            ))
-        }
-
-        if original.protocolSelection != .conduit,
-           !original.beastModeEnabled || original.protocolSelection != .auto {
-            plans.append(PhasePlan(
-                phase: .beastAuto,
-                detail: "protocol=auto beast=true",
-                mutate: {
-                    $0.protocolSelection = .auto
-                    $0.beastModeEnabled = true
-                },
-                useChain: true,
-                reconnects: 0
-            ))
-        }
-
-        if original.secureDNSMode != .off {
-            plans.append(PhasePlan(
-                phase: .secureDnsOff,
-                detail: "secure_dns=off",
-                mutate: {
-                    $0.secureDNSMode = .off
-                    $0.blockCleartextDNS = false
-                },
-                useChain: original.protocolSelection != .conduit,
-                reconnects: original.protocolSelection == .conduit ? 2 : 0
-            ))
-        }
-
-        if original.protocolSelection == .conduit {
-            if original.conduitMode != .publicOnly {
-                plans.append(PhasePlan(
-                    phase: .conduitPublic,
-                    detail: "conduit=public",
-                    mutate: {
-                        $0.conduitMode = .publicOnly
-                        $0.conduitFallbackToPublic = true
-                    },
-                    useChain: false,
-                    reconnects: 2
-                ))
-            }
-            if original.rejectCensoredCountryProxies {
-                plans.append(PhasePlan(
-                    phase: .conduitUncensor,
-                    detail: "reject_censored=false",
-                    mutate: { $0.rejectCensoredCountryProxies = false },
-                    useChain: false,
-                    reconnects: 2
-                ))
-            }
+        for region in egressRegionsToTry(
+            current: original.egressRegion,
+            best: best,
+            telemetryRegion: telemetryRegion
+        ) {
+            var regional = original
+            regional.egressRegion = region
+            append(phase: .egressRegion, detail: "egress=\(region)", settings: regional)
         }
 
         if original.protocolSelection != .conduit {
-            plans.append(PhasePlan(
-                phase: .directReconnect,
-                detail: "protocol=direct",
-                mutate: {
-                    $0.protocolSelection = .direct
-                    $0.beastModeEnabled = false
-                },
-                useChain: false,
-                reconnects: 2
-            ))
+            for step in FallbackChainController.steps(for: original.protocolSelection, settings: original) {
+                var trial = original
+                trial.protocolSelection = step.protocolSelection
+                trial.beastModeEnabled = step.beast
+                if let conduitMode = step.conduitMode {
+                    trial.conduitMode = conduitMode
+                    trial.conduitFallbackToPublic = true
+                }
+                append(
+                    phase: .transportChain,
+                    detail: "transport=\(step.transport.rawValue)",
+                    settings: trial,
+                    fallbackStep: step.transport,
+                    timeoutSeconds: step.timeoutSeconds
+                )
+            }
+
+            if !original.beastModeEnabled || original.protocolSelection != .auto {
+                var beast = original
+                beast.protocolSelection = .auto
+                beast.beastModeEnabled = true
+                append(phase: .beastAuto, detail: "protocol=auto beast=true", settings: beast)
+            }
+
+            var direct = original
+            direct.protocolSelection = .direct
+            direct.beastModeEnabled = false
+            append(phase: .directReconnect, detail: "protocol=direct", settings: direct)
+        } else {
+            if original.conduitMode != .publicOnly {
+                var publicConduit = original
+                publicConduit.conduitMode = .publicOnly
+                publicConduit.conduitFallbackToPublic = true
+                append(
+                    phase: .conduitPublic,
+                    detail: "conduit=public",
+                    settings: publicConduit
+                )
+            }
+            if original.rejectCensoredCountryProxies {
+                var uncensored = original
+                uncensored.rejectCensoredCountryProxies = false
+                append(
+                    phase: .conduitUncensor,
+                    detail: "reject_censored=false",
+                    settings: uncensored
+                )
+            }
         }
 
         return plans
     }
 
-    private static func egressRegionsToTry(current: String) -> [String] {
-        let normalized = current.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return egressPriority
-            .filter { $0 != normalized }
-            .prefix(maxEgressRotations)
-            .map { $0 }
+    private static func normalizedRegion(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let normalized = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard normalized.count == 2,
+              normalized.allSatisfy({ $0.isLetter && $0.isASCII }) else { return nil }
+        return normalized
     }
 
     private static func settingsApplyingBestServer(
@@ -238,43 +310,22 @@ enum NoInternetRecoveryController {
         default:
             return nil
         }
+        if let egress = normalizedRegion(best.egressRegion) {
+            trial.egressRegion = egress
+        }
         return trial == base ? nil : trial
     }
 
-    private static func runPhase(
-        plan: PhasePlan,
-        vpn: VPNController,
-        baseline: AppSettings
-    ) async -> AppSettings? {
-        var trial = baseline
-        plan.mutate(&trial)
-        SharedSettingsStore.shared.updateAppSettings(trial, logKey: "smart_recovery_\(plan.phase.rawValue)")
-        try? SharedSettingsStore.shared.recomposeEffectiveConfig()
-
-        if plan.useChain {
-            let ok = await FallbackChainController.connectWithChain(
-                vpn: vpn,
-                baseSettings: trial,
-                force: true,
-                runDiagnosticsOnSuccess: false
-            )
-            return ok ? SharedSettingsStore.shared.appSettings : nil
+    private static func fallbackStep(for settings: AppSettings) -> FallbackStep? {
+        switch settings.protocolSelection {
+        case .cdnFronting:
+            return .cdn
+        case .auto where settings.beastModeEnabled:
+            return .autoBeast
+        case .direct:
+            return .direct
+        case .auto, .conduit:
+            return nil
         }
-
-        let timeout = max(trial.fallbackTimeoutDirect, 60)
-        for attempt in 1...max(plan.reconnects, 1) {
-            SharedLogger.shared.logRaw(
-                "SMART_RECOVERY_RECONNECT",
-                detail: "phase=\(plan.phase.rawValue) attempt=\(attempt)"
-            )
-            SharedSettingsStore.shared.lastInternetTestOK = false
-            await vpn.connect(skipFallbackChain: true)
-            if await InternetConnectivityTest.waitForConnectedTunnel(timeoutSeconds: timeout) {
-                return SharedSettingsStore.shared.appSettings
-            }
-            await vpn.disconnect()
-            try? await TaskSleep.seconds(1)
-        }
-        return nil
     }
 }

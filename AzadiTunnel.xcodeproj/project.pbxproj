@@ -57,6 +57,7 @@
 /* Begin PBXFileReference section */
 		2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AzadiTunnel.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AzadiTunnelUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A10000042FCFF95000D0A30A /* AzadiTunnelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AzadiTunnelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = AzadiTunnelPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PsiphonTunnelCore.xcframework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -95,6 +96,11 @@
 			path = AzadiTunnelUITests;
 			sourceTree = "<group>";
 		};
+		A10000632FCFF95000D0A30A /* AzadiTunnelTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AzadiTunnelTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -120,6 +126,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000272FCFF95000D0A30A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -131,6 +144,7 @@
 				A10000602FCFF95000D0A30A /* AzadiTunnelShared */,
 				A10000612FCFF95000D0A30A /* AzadiTunnelPacketTunnel */,
 				A10000622FCFF95000D0A30A /* AzadiTunnelUITests */,
+				A10000632FCFF95000D0A30A /* AzadiTunnelTests */,
 				2C35943E2FCFF94200D0A30A /* Products */,
 			);
 			sourceTree = "<group>";
@@ -141,6 +155,7 @@
 				2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */,
 				A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */,
 				A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */,
+				A10000042FCFF95000D0A30A /* AzadiTunnelTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -226,6 +241,27 @@
 			productReference = A10000032FCFF95000D0A30A /* AzadiTunnelUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		A10000052FCFF95000D0A30A /* AzadiTunnelTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A10000502FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelTests" */;
+			buildPhases = (
+				A10000262FCFF95000D0A30A /* Sources */,
+				A10000272FCFF95000D0A30A /* Frameworks */,
+				A10000282FCFF95000D0A30A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A10003052FCFF95000D0A30A /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A10000632FCFF95000D0A30A /* AzadiTunnelTests */,
+			);
+			name = AzadiTunnelTests;
+			productName = AzadiTunnelTests;
+			productReference = A10000042FCFF95000D0A30A /* AzadiTunnelTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -251,6 +287,10 @@
 						CreatedOnToolsVersion = 26.5;
 						TestTargetID = 2C35943C2FCFF94200D0A30A;
 					};
+					A10000052FCFF95000D0A30A = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = 2C35943C2FCFF94200D0A30A;
+					};
 				};
 			};
 			buildConfigurationList = 2C3594382FCFF94200D0A30A /* Build configuration list for PBXProject "AzadiTunnel" */;
@@ -272,6 +312,7 @@
 				2C35943C2FCFF94200D0A30A /* AzadiTunnel */,
 				A10000012FCFF95000D0A30A /* AzadiTunnelPacketTunnel */,
 				A10000022FCFF95000D0A30A /* AzadiTunnelUITests */,
+				A10000052FCFF95000D0A30A /* AzadiTunnelTests */,
 			);
 		};
 /* End PBXProject section */
@@ -292,6 +333,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A10000232FCFF95000D0A30A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A10000282FCFF95000D0A30A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -322,6 +370,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A10000262FCFF95000D0A30A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -331,6 +386,11 @@
 			targetProxy = A10003012FCFF95000D0A30A /* PBXContainerItemProxy */;
 		};
 		A10003032FCFF95000D0A30A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2C35943C2FCFF94200D0A30A /* AzadiTunnel */;
+			targetProxy = A10003042FCFF95000D0A30A /* PBXContainerItemProxy */;
+		};
+		A10003052FCFF95000D0A30A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 2C35943C2FCFF94200D0A30A /* AzadiTunnel */;
 			targetProxy = A10003042FCFF95000D0A30A /* PBXContainerItemProxy */;
@@ -638,6 +698,51 @@
 			};
 			name = Release;
 		};
+		A100004E2FCFF95000D0A30A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AzadiTunnel.app/AzadiTunnel";
+			};
+			name = Debug;
+		};
+		A100004F2FCFF95000D0A30A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 4QF88W2GKT;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AzadiTunnel.app/AzadiTunnel";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -673,6 +778,15 @@
 			buildConfigurations = (
 				A100004C2FCFF95000D0A30A /* Debug */,
 				A100004D2FCFF95000D0A30A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A10000502FCFF95000D0A30A /* Build configuration list for PBXNativeTarget "AzadiTunnelTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A100004E2FCFF95000D0A30A /* Debug */,
+				A100004F2FCFF95000D0A30A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

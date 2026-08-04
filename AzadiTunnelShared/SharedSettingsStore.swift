@@ -4,10 +4,50 @@ final class SharedSettingsStore {
     static let shared = SharedSettingsStore()
 
     private var lastLoggedVPNStatus: VPNStatusDisplay?
+    /// Once a process has accepted the overlay for a live tunnel, keep that
+    /// snapshot for the process lifetime. The persisted envelope is only the
+    /// restart handoff/stale-session guard; it must not silently change an
+    /// already-running tunnel when its lease elapses.
+    private var activeRecoveryTrialSettings: AppSettings?
+
+    /// Runtime settings used by an active recovery attempt. This overlay is
+    /// shared with the packet extension, but never replaces the user's durable
+    /// `appSettings` preference.
+    private var recoveryTrialEnvelope: RecoveryTrialSettingsEnvelope? {
+        guard let data = defaults?.data(forKey: AppGroupConstants.recoveryTrialSettingsKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(RecoveryTrialSettingsEnvelope.self, from: data)
+    }
+
+    var recoveryTrialSettings: AppSettings? {
+        if let activeRecoveryTrialSettings {
+            guard recoveryTrialEnvelope != nil else {
+                self.activeRecoveryTrialSettings = nil
+                return nil
+            }
+            return activeRecoveryTrialSettings
+        }
+        guard let envelope = recoveryTrialEnvelope,
+              !envelope.isExpired() else {
+            return nil
+        }
+        return envelope.settings
+    }
+
+    var recoveryTrialExpiresAt: Date? {
+        recoveryTrialEnvelope?.expiresAt
+    }
+
+    /// Settings currently in force for the tunnel process. UI and diagnostics
+    /// that describe the user's preference should continue to use `appSettings`.
+    var effectiveAppSettings: AppSettings {
+        recoveryTrialSettings ?? appSettings
+    }
 
     /// Settings overlay used inside the packet tunnel (messaging compatibility mode).
     var tunnelEffectiveAppSettings: AppSettings {
-        MessagingAppsConfiguration.tunnelSettings(from: appSettings)
+        MessagingAppsConfiguration.tunnelSettings(from: effectiveAppSettings)
     }
 
     private var defaults: UserDefaults? {
@@ -324,9 +364,10 @@ final class SharedSettingsStore {
         SharedLogger.shared.log(.psiphonConfigInstalled, detail: "bundled=\(bundled)")
     }
 
-    func recomposeEffectiveConfig() throws {
+    func recomposeEffectiveConfig(using settings: AppSettings? = nil) throws {
         guard let base = psiphonConfigBaseJSON else { return }
-        let composed = try PsiphonConfigComposer.compose(baseJSON: base, settings: appSettings)
+        let activeSettings = settings ?? effectiveAppSettings
+        let composed = try PsiphonConfigComposer.compose(baseJSON: base, settings: activeSettings)
         let hasEntries = psiphonServerEntriesLineCount > 0
         psiphonConfigJSON = try PsiphonConfigValidator.normalizedJSON(
             composed,
@@ -334,9 +375,58 @@ final class SharedSettingsStore {
         )
         let readiness = conduitDistributorReadiness
         SharedLogger.shared.logRaw("CONDUIT_CONFIG", detail: readiness.logDetail)
-        if appSettings.protocolSelection == .conduit, !readiness.allowsConduit {
+        if activeSettings.protocolSelection == .conduit, !readiness.allowsConduit {
             SharedLogger.shared.logRaw("CONDUIT_BLOCKED", detail: "missing_distributor_keys")
         }
+    }
+
+    /// Applies a recovery candidate to the shared runtime overlay and composed
+    /// Psiphon config. The durable user preference remains untouched.
+    func applyRecoveryTrialSettings(_ settings: AppSettings) {
+        activeRecoveryTrialSettings = settings
+        let envelope = RecoveryTrialSettingsEnvelope(settings: settings)
+        if let data = try? JSONEncoder().encode(envelope) {
+            defaults?.set(data, forKey: AppGroupConstants.recoveryTrialSettingsKey)
+        }
+        try? recomposeEffectiveConfig(using: settings)
+    }
+
+    /// Removes the recovery overlay and composes the durable user settings again.
+    /// Callers own serialization; recovery uses this exactly once per failed or
+    /// cancelled active trial, while a verified winner remains overlaid until
+    /// the user/extension disconnects.
+    func clearRecoveryTrialSettings() {
+        activeRecoveryTrialSettings = nil
+        let hadOverlay = defaults?.object(forKey: AppGroupConstants.recoveryTrialSettingsKey) != nil
+        defaults?.removeObject(forKey: AppGroupConstants.recoveryTrialSettingsKey)
+        guard hadOverlay else { return }
+        try? recomposeEffectiveConfig(using: appSettings)
+    }
+
+    /// Extension-side stale guard. This is intentionally callable before the
+    /// extension reads `effectiveAppSettings`, so a process restart cannot
+    /// revive a valid-looking but expired candidate.
+    func discardExpiredRecoveryTrialSettings(now: Date = Date()) {
+        guard let defaults,
+              let data = defaults.data(forKey: AppGroupConstants.recoveryTrialSettingsKey) else {
+            return
+        }
+        guard let envelope = try? JSONDecoder().decode(
+            RecoveryTrialSettingsEnvelope.self,
+            from: data
+        ) else {
+            clearRecoveryTrialSettings()
+            return
+        }
+        guard envelope.isExpired(at: now) else { return }
+        clearRecoveryTrialSettings()
+    }
+
+    /// Marks a persisted overlay as active in this process after the stale
+    /// guard has run. PacketTunnelProvider calls this before consuming settings.
+    func activateRecoveryTrialSettingsIfPresent() {
+        guard let settings = recoveryTrialSettings else { return }
+        activeRecoveryTrialSettings = settings
     }
 
     func updateAppSettings(_ settings: AppSettings, logKey: String) {

@@ -830,7 +830,7 @@ final class LANProxyBridge: @unchecked Sendable {
         guard currentConfiguration() != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxyHttpClientConnected)
-        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+        if SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled {
             SharedLogger.shared.log(.proxyOnlyClientConnected, detail: "kind=http")
         }
         incoming.stateUpdateHandler = { [weak self] state in
@@ -855,7 +855,7 @@ final class LANProxyBridge: @unchecked Sendable {
         guard currentConfiguration() != nil else { incoming.cancel(); return }
         track(incoming)
         SharedLogger.shared.log(.lanProxySocksClientConnected)
-        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+        if SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled {
             SharedLogger.shared.log(.proxyOnlySocksClientConnected)
         }
         incoming.stateUpdateHandler = { [weak self] state in
@@ -1030,13 +1030,13 @@ final class LANProxyBridge: @unchecked Sendable {
             }
             try await sendSOCKSReply(client, code: 0x00) // success
             SharedLogger.shared.log(.lanProxySocksConnectEstablished, detail: "\(host):\(port)")
-            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+            if SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled {
                 SharedLogger.shared.log(.proxyOnlySocksHandshakeOk, detail: "\(host):\(port)")
             }
             untrack(client)
             startRelay(client: client, upstream: upstream, label: "socks")
         } catch {
-            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+            if SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled {
                 SharedLogger.shared.log(.proxyOnlySocksHandshakeFailed, detail: errText(error))
             }
             SharedLogger.shared.log(.lanProxyRelayError, detail: "stage=socks_handshake \(errText(error))")
@@ -1122,7 +1122,7 @@ final class LANProxyBridge: @unchecked Sendable {
         guard logLabel == "system-http" else { return remapped }
         guard Self.ipv4Bytes(host) == nil, !host.contains(":") else { return remapped }
 
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         guard settings.secureDNSMode == .doh else { return remapped }
 
         let qname = host.trimmingCharacters(in: CharacterSet(charactersIn: "."))

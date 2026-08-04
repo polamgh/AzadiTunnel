@@ -46,7 +46,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     }
 
     private var connectWaitSeconds: TimeInterval {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         if settings.protocolSelection == .conduit { return 120 }
         if settings.beastModeEnabled { return 120 }
         return 90
@@ -590,7 +590,7 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
         readiness.markCoreDisconnected(generation: generation)
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
         TunnelStatisticsStore.setConnectedTunnelProtocol("")
-        if SharedSettingsStore.shared.appSettings.protocolSelection == .conduit {
+        if SharedSettingsStore.shared.effectiveAppSettings.protocolSelection == .conduit {
             lock.lock()
             let composedJSON = configJSON
             lock.unlock()
@@ -609,7 +609,7 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
     }
 
     private func startConduitFallbackTimerIfNeeded(generation: UInt64) {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         guard settings.protocolSelection == .conduit,
               settings.conduitMode == .auto,
               !settings.conduitFallbackToPublic else { return }
@@ -629,9 +629,13 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
             guard let self, self.isCurrentGeneration(generation) else { return }
             guard !SharedSettingsStore.shared.psiphonTunnelEstablished else { return }
 
-            var appSettings = SharedSettingsStore.shared.appSettings
+            var appSettings = SharedSettingsStore.shared.effectiveAppSettings
             appSettings.conduitFallbackToPublic = true
-            SharedSettingsStore.shared.updateAppSettings(appSettings, logKey: "conduit_fallback_timeout")
+            if SharedSettingsStore.shared.recoveryTrialSettings != nil {
+                SharedSettingsStore.shared.applyRecoveryTrialSettings(appSettings)
+            } else {
+                SharedSettingsStore.shared.updateAppSettings(appSettings, logKey: "conduit_fallback_timeout")
+            }
             SharedLogger.shared.logRaw("CONDUIT_PUBLIC_FALLBACK", detail: "timeout_s=\(timeoutSec)")
             PsiphonCommunityDiagnostics.notePublicFallback()
             SharedLogger.shared.logRaw(
@@ -689,7 +693,7 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
     @objc func onDiagnosticMessage(_ message: String, withTimestamp timestamp: String) {
         let lower = message.lowercased()
         PsiphonRemoteServerListDiagnostics.handleDiagnostic(message)
-        if SharedSettingsStore.shared.appSettings.protocolSelection == .conduit {
+        if SharedSettingsStore.shared.effectiveAppSettings.protocolSelection == .conduit {
             PsiphonShiroConduitCompare.logDiagnostic(message)
             PsiphonCommunityDiagnostics.handleDiagnostic(message)
         }

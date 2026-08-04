@@ -51,6 +51,9 @@ struct FallbackChainState: Codable, Equatable {
 struct BestServerSelection: Codable, Equatable {
     var transport: String = ""
     var tunnelProtocol: String = ""
+    /// Last known successful Psiphon egress code, when telemetry exposed one.
+    /// Optional keeps older persisted selections decodable.
+    var egressRegion: String? = nil
     var latencyMs: Int = -1
     var cdnEdgeIP: String = ""
     var cdnSNI: String = ""

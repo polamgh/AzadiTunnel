@@ -72,7 +72,9 @@ enum FallbackChainController {
         vpn: VPNController,
         baseSettings: AppSettings? = nil,
         force: Bool = false,
-        runDiagnosticsOnSuccess: Bool = true
+        runDiagnosticsOnSuccess: Bool = true,
+        budget: RecoveryBudget? = nil,
+        sessionID: UUID? = nil
     ) async -> Bool {
         let original = baseSettings ?? SharedSettingsStore.shared.appSettings
         if !force, !shouldUseChain(for: original.protocolSelection) {
@@ -80,24 +82,48 @@ enum FallbackChainController {
         }
         let chainSteps = steps(for: original.protocolSelection, settings: original)
         guard !chainSteps.isEmpty else { return false }
-        var state = FallbackChainState(isActive: true)
-        ConnectionDiagnosticsStore.saveFallback(state)
-        SharedLogger.shared.logRaw("FALLBACK_CHAIN_STARTED", detail: "steps=\(chainSteps.count)")
-        defer {
-            // A fallback trial is runtime state, not a replacement for the user's explicit choice.
-            // Restore the original settings after every chain, while the active tunnel continues
-            // using the trial already handed to the extension.
-            SharedSettingsStore.shared.updateAppSettings(original, logKey: "fallback_restore_settings")
-            var done = ConnectionDiagnosticsStore.loadFallback()
-            done.isActive = false
-            ConnectionDiagnosticsStore.saveFallback(done)
+
+        let gate = RecoverySessionGate.shared
+        let session: UUID
+        let ownsSession: Bool
+        if let sessionID {
+            guard gate.owns(sessionID) else {
+                SharedLogger.shared.logRaw("FALLBACK_CHAIN_SKIPPED", detail: "reason=overlapping_recovery")
+                return false
+            }
+            session = sessionID
+            ownsSession = false
+        } else {
+            guard let acquired = gate.acquire() else {
+                SharedLogger.shared.logRaw("FALLBACK_CHAIN_SKIPPED", detail: "reason=overlapping_recovery")
+                return false
+            }
+            session = acquired
+            ownsSession = true
         }
 
-        for step in chainSteps {
-            state.currentStep = step.transport
-            ConnectionDiagnosticsStore.saveFallback(state)
-            SharedLogger.shared.logRaw("FALLBACK_ATTEMPT", detail: "transport=\(step.transport.rawValue)")
+        let networkSnapshot = await IOSNetworkProfileProvider.current()
 
+        let runBudget = budget ?? RecoveryBudget()
+        var state = FallbackChainState(isActive: true)
+        ConnectionDiagnosticsStore.saveFallback(state)
+        SharedLogger.shared.logRaw(
+            "FALLBACK_CHAIN_STARTED",
+            detail: "steps=\(chainSteps.count) budget=\(Int(runBudget.remaining))"
+        )
+
+        defer {
+            // Commit the terminal snapshot exactly once. In particular, do
+            // not reload the previous persisted value here: the exhausted,
+            // cancelled, and successful fields are updated in this run.
+            state.isActive = false
+            ConnectionDiagnosticsStore.saveFallback(state)
+            if ownsSession {
+                gate.release(session)
+            }
+        }
+
+        let attempts = chainSteps.map { step -> RecoveryAttemptRunner.Attempt in
             var trial = original
             trial.protocolSelection = step.protocolSelection
             trial.beastModeEnabled = step.beast
@@ -105,71 +131,127 @@ enum FallbackChainController {
                 trial.conduitMode = conduitMode
                 trial.conduitFallbackToPublic = true
             }
-            SharedSettingsStore.shared.updateAppSettings(trial, logKey: "fallback_trial_\(step.transport.rawValue)")
-            try? SharedSettingsStore.shared.recomposeEffectiveConfig()
-
-            await vpn.disconnect()
-            try? await TaskSleep.seconds(1)
-            await vpn.connect(skipFallbackChain: true)
-
-            let forceFailCDN = ProcessInfo.processInfo.arguments.contains("-UITestForceFallbackFailCDN")
-                && step.transport == .cdn
-            let success = forceFailCDN ? false : await waitForConnected(step.timeoutSeconds)
-            if success {
-                let protocolRaw = TunnelStatisticsStore.load().connectedTunnelProtocol
-                state.succeededStep = step.transport
-                state.succeededProtocol = protocolRaw
-                state.currentStep = step.transport
-                ConnectionDiagnosticsStore.saveFallback(state)
-                SharedLogger.shared.logRaw(
-                    "FALLBACK_SUCCESS",
-                    detail: "transport=\(step.transport.rawValue) protocol=\(protocolRaw)"
-                )
-                if runDiagnosticsOnSuccess {
-                    await vpn.runPostConnectDiagnostics()
-                }
-                let networkSnapshot = await IOSNetworkProfileProvider.current()
-                persistBestServerSelection(
-                    transport: step.transport,
-                    tunnelProtocol: protocolRaw,
-                    networkSnapshot: networkSnapshot
-                )
-                return true
-            }
-
-            let reason = vpn.lastError ?? "timeout_or_no_tunnel"
-            state.lastFailedStep = step.transport
-            state.lastFailureReason = reason
-            ConnectionDiagnosticsStore.saveFallback(state)
-            SharedLogger.shared.logRaw(
-                "FALLBACK_FAILED",
-                detail: "transport=\(step.transport.rawValue) reason=\(reason)"
+            return RecoveryAttemptRunner.Attempt(
+                id: step.transport.rawValue,
+                settings: trial,
+                timeoutSeconds: step.timeoutSeconds
             )
         }
 
-        state.exhausted = true
-        state.isActive = false
-        ConnectionDiagnosticsStore.saveFallback(state)
-        SharedLogger.shared.logRaw("FALLBACK_EXHAUSTED", detail: "all_steps_failed")
-        let tried = chainSteps.map(\.transport.rawValue).joined(separator: ", ")
-        vpn.setFallbackFailureMessage("Could not connect. Tried \(tried). See Logs for FALLBACK_* lines.")
-        return false
+        let runner = RecoveryAttemptRunner(operations: .init(
+            applyTrial: { trial in
+                SharedSettingsStore.shared.applyRecoveryTrialSettings(trial)
+            },
+            restoreBaseline: { _ in
+                SharedSettingsStore.shared.clearRecoveryTrialSettings()
+            },
+            disconnect: {
+                await vpn.disconnect(cancelRecovery: false)
+            },
+            connect: {
+                await vpn.connect(skipFallbackChain: true, recoverySessionID: session)
+            },
+            verify: { attempt, timeout, budget in
+                let forceFailCDN = ProcessInfo.processInfo.arguments.contains("-UITestForceFallbackFailCDN")
+                    && attempt.id == FallbackStep.cdn.rawValue
+                if forceFailCDN {
+                    return false
+                }
+                return await InternetConnectivityTest.waitForConnectedTunnel(
+                    timeoutSeconds: timeout,
+                    budget: budget,
+                    clock: budget.clock,
+                    isCancellationRequested: {
+                        gate.isCancellationRequested(for: session)
+                    }
+                )
+            },
+            persistWinner: { _ in
+                // Record only path-scoped winner metadata. The winning overlay
+                // remains active for this tunnel, while durable AppSettings is
+                // never changed by a fallback trial.
+                persistBestServerSelection(
+                    transport: state.succeededStep ?? .direct,
+                    tunnelProtocol: state.succeededProtocol,
+                    networkSnapshot: networkSnapshot
+                )
+            },
+            isCancellationRequested: {
+                gate.isCancellationRequested(for: session)
+            },
+            attemptStarted: { index, attempt in
+                guard let step = chainSteps.first(where: { $0.transport.rawValue == attempt.id }) else { return }
+                state.currentStep = step.transport
+                ConnectionDiagnosticsStore.saveFallback(state)
+                SharedLogger.shared.logRaw(
+                    "FALLBACK_ATTEMPT",
+                    detail: "transport=\(step.transport.rawValue) step=\(index)/\(chainSteps.count) remaining=\(Int(runBudget.remaining))"
+                )
+            },
+            attemptFinished: { _, attempt, verified in
+                guard let step = chainSteps.first(where: { $0.transport.rawValue == attempt.id }) else { return }
+                if verified {
+                    state.succeededStep = step.transport
+                    state.succeededProtocol = TunnelStatisticsStore.load().connectedTunnelProtocol
+                    state.currentStep = step.transport
+                    ConnectionDiagnosticsStore.saveFallback(state)
+                    SharedLogger.shared.logRaw(
+                        "FALLBACK_SUCCESS",
+                        detail: "transport=\(step.transport.rawValue) protocol=\(state.succeededProtocol)"
+                    )
+                } else {
+                    state.lastFailedStep = step.transport
+                    state.lastFailureReason = vpn.lastError ?? "timeout_or_no_tunnel"
+                    ConnectionDiagnosticsStore.saveFallback(state)
+                    SharedLogger.shared.logRaw(
+                        "FALLBACK_FAILED",
+                        detail: "transport=\(step.transport.rawValue) reason=\(state.lastFailureReason)"
+                    )
+                }
+            }
+        ))
+
+        let result = await runner.run(
+            attempts: attempts,
+            baseline: original,
+            budget: runBudget,
+            maxAttempts: chainSteps.count
+        )
+
+        switch result {
+        case .succeeded:
+            if runDiagnosticsOnSuccess {
+                await vpn.runPostConnectDiagnostics(alreadyVerified: true)
+            }
+            return true
+        case .cancelled:
+            state.currentStep = nil
+            state.lastFailureReason = "cancelled"
+            SharedLogger.shared.logRaw("FALLBACK_CANCELLED", detail: "remaining=\(Int(runBudget.remaining))")
+            return false
+        case .exhausted:
+            state.exhausted = true
+            state.currentStep = nil
+            SharedLogger.shared.logRaw("FALLBACK_EXHAUSTED", detail: "all_steps_failed")
+            let tried = chainSteps.map(\.transport.rawValue).joined(separator: ", ")
+            vpn.setFallbackFailureMessage("Could not connect. Tried \(tried). See Logs for FALLBACK_* lines.")
+            return false
+        }
     }
 
-    private static func waitForConnected(_ timeout: TimeInterval) async -> Bool {
-        await InternetConnectivityTest.waitForConnectedTunnel(timeoutSeconds: timeout)
-    }
-
-    private static func persistBestServerSelection(
+    static func persistBestServerSelection(
         transport: FallbackStep,
         tunnelProtocol: String,
         networkSnapshot: NetworkPathSnapshot
     ) {
         let quality = ConnectionDiagnosticsStore.loadQuality()
+        let statistics = TunnelStatisticsStore.load()
         let latency = quality?.latencyMs ?? -1
+        let egress = statistics.connectedServerRegion.trimmingCharacters(in: .whitespacesAndNewlines)
         let selection = BestServerSelection(
             transport: transport.rawValue,
             tunnelProtocol: tunnelProtocol,
+            egressRegion: egress.isEmpty ? nil : egress,
             latencyMs: latency,
             cdnEdgeIP: quality?.cdnEdgeIP ?? "",
             cdnSNI: quality?.cdnSNI ?? "",
@@ -177,6 +259,7 @@ enum FallbackChainController {
         )
         ConnectionDiagnosticsStore.saveBestServer(selection, for: networkSnapshot)
         var detail = "transport=\(transport.rawValue) protocol=\(tunnelProtocol)"
+        if let egress = selection.egressRegion, !egress.isEmpty { detail += " egress=\(egress)" }
         if latency >= 0 { detail += " latency_ms=\(latency)" }
         if !selection.cdnEdgeIP.isEmpty { detail += " fronting_ip=\(selection.cdnEdgeIP)" }
         if !selection.cdnSNI.isEmpty { detail += " fronting_sni=\(selection.cdnSNI)" }

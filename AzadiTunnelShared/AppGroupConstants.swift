@@ -11,6 +11,9 @@ enum AppGroupConstants {
     static let psiphonBootstrapVersionKey = "psiphon_bootstrap_app_version"
     static let psiphonUsesBundledConfigKey = "psiphon_uses_bundled_config"
     static let appSettingsKey = "app_settings_json"
+    /// Ephemeral recovery overlay consumed by the app and packet extension. It
+    /// is deliberately separate from the user's durable AppSettings preference.
+    static let recoveryTrialSettingsKey = "recovery_trial_settings_json"
     static let sharedLogsKey = "shared_logs"
     static let vpnStatusKey = "vpn_status"
     static let testModeKey = "ui_test_mode"

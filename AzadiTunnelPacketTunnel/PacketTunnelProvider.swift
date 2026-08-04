@@ -33,18 +33,26 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
         SharedLogger.shared.log(.extensionSettingsLoaded)
+        // Recovery overlays are short-lived session data. Validate them inside
+        // the extension before reading the effective settings so an on-demand
+        // restart cannot revive an expired candidate after app process death.
+        SharedSettingsStore.shared.discardExpiredRecoveryTrialSettings()
+        SharedSettingsStore.shared.activateRecoveryTrialSettingsIfPresent()
+        let activeSettings = SharedSettingsStore.shared.effectiveAppSettings
 
         guard let configJSON = SharedSettingsStore.shared.psiphonConfigJSON else {
             SharedLogger.shared.log(.tunnelStartFailed, detail: "reason=no_config")
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
             completeStart(NSError(domain: "AzadiTunnel", code: 2, userInfo: [NSLocalizedDescriptionKey: "Psiphon configuration not installed"]))
             return
         }
 
-        if SharedSettingsStore.shared.appSettings.protocolSelection == .conduit,
+        if activeSettings.protocolSelection == .conduit,
            !SharedSettingsStore.shared.conduitConnectAllowed {
             let readiness = SharedSettingsStore.shared.conduitDistributorReadiness
             SharedLogger.shared.logRaw("CONDUIT_BLOCKED", detail: "missing_distributor_keys \(readiness.logDetail)")
             TunnelStatisticsStore.seedConduitConnecting(missingDistributorKeys: true)
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
             completeStart(NSError(
                 domain: "AzadiTunnel",
                 code: 3,
@@ -65,8 +73,8 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
         if let configJSON = SharedSettingsStore.shared.psiphonConfigJSON {
             let limit = PsiphonConfigComposer.parseLimitProtocols(from: configJSON)
-            let proto = SharedSettingsStore.shared.appSettings.protocolSelection.rawValue
-            let beast = SharedSettingsStore.shared.appSettings.beastModeEnabled
+            let proto = activeSettings.protocolSelection.rawValue
+            let beast = activeSettings.beastModeEnabled
             SharedLogger.shared.logRaw(
                 "PSIPHON_PROTOCOL_LIMIT",
                 detail: "selection=\(proto) beast=\(beast) limits=\(limit)"
@@ -74,18 +82,18 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             SharedLogger.shared.logRaw(
                 "PSIPHON_SHIRO_CONFIG",
                 detail: PsiphonShiroTunnelConfig.logSummary(
-                    settings: SharedSettingsStore.shared.appSettings,
+                    settings: activeSettings,
                     composedJSON: configJSON,
                     embeddedServerEntryLines: SharedSettingsStore.shared.psiphonServerEntriesLineCount
                 )
             )
-            let selection = SharedSettingsStore.shared.appSettings.protocolSelection
+            let selection = activeSettings.protocolSelection
             if selection == .cdnFronting {
                 let limits = PsiphonConfigComposer.parseLimitProtocols(from: configJSON)
                 SharedLogger.shared.logRaw(
                     "CDN_FRONTING_CONFIG",
                     detail: PsiphonShiroCDNFrontingConfig.logSummary(
-                        settings: SharedSettingsStore.shared.appSettings,
+                        settings: activeSettings,
                         composedJSON: configJSON
                     )
                 )
@@ -94,10 +102,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     detail: "count=\(PsiphonShiroCDNFrontingConfig.cdnFrontingModeProtocols.count) values=\(limits)"
                 )
                 let customIPs = PsiphonShiroCDNFrontingConfig.parseIPList(
-                    SharedSettingsStore.shared.appSettings.cdnFrontingCustomIpList
+                    activeSettings.cdnFrontingCustomIpList
                 )
                 let customSNIs = PsiphonShiroCDNFrontingConfig.parseSNIList(
-                    SharedSettingsStore.shared.appSettings.cdnFrontingCustomSni
+                    activeSettings.cdnFrontingCustomSni
                 )
                 SharedLogger.shared.logRaw(
                     "CDN_FRONTING_EDGE_IPS",
@@ -109,7 +117,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 )
             }
             if selection == .conduit {
-                let settings = SharedSettingsStore.shared.appSettings
+                let settings = activeSettings
                 let mode = settings.conduitMode.rawValue
                 let compartment = PsiphonConduitConfig.usesPersonalCompartment(settings: settings)
                 let hasPersonalID = PsiphonConfigComposer.hasPersonalConduitCompartment(in: configJSON)
@@ -134,10 +142,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
         }
 
-        let region = SharedSettingsStore.shared.appSettings.egressRegion
-        if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled,
+        let region = activeSettings.egressRegion
+        if activeSettings.proxyOnlyModeEnabled,
            LocalNetworkAddress.wifiIPv4() == nil {
             SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=extension")
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
             completeStart(NSError(
                 domain: "AzadiTunnel",
                 code: 4,
@@ -166,7 +175,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     "PACKET_ENGINE_CAPABILITIES",
                     detail: "ipv6=\(packetEngineCapabilities.logValue)"
                 )
-                let appSettings = SharedSettingsStore.shared.appSettings
+                let appSettings = activeSettings
                 let proxyOnly = appSettings.proxyOnlyModeEnabled
 
                 if proxyOnly {
@@ -299,6 +308,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         stopPacketForwarding()
         TunnelStatisticsStore.markDisconnected()
         SharedSettingsStore.shared.vpnStatus = .disconnected
+        SharedSettingsStore.shared.clearRecoveryTrialSettings()
         SharedLogger.shared.log(.tunnelStopCleanup)
         completionHandler()
 
@@ -679,6 +689,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             await engine.stopWithTimeout(seconds: 10)
         }
         TunnelStatisticsStore.markDisconnected()
+        SharedSettingsStore.shared.clearRecoveryTrialSettings()
     }
 
     private func psiphonDataDirectory() throws -> URL {
@@ -705,7 +716,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             Task { [weak self] in
                 guard let self else { completionHandler?(nil); return }
                 if let endpoints = self.engine?.localProxyEndpoints, endpoints.hasSocks {
-                    let proxyOnly = SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+                    let proxyOnly = SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled
                     await self.startProxyBridge(using: endpoints, proxyOnly: proxyOnly)
                 } else {
                     SharedSettingsStore.shared.lanProxyRuntimeStatus = .vpnDisconnected
@@ -713,7 +724,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
             }
         case "lan-proxy:stop":
-            if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
+            if SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled {
                 Task { [weak self] in
                     guard let self else { completionHandler?(nil); return }
                     if let endpoints = self.engine?.localProxyEndpoints, endpoints.hasSocks {
@@ -729,7 +740,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             completionHandler?(SharedSettingsStore.shared.lanProxyRuntimeStatus.rawValue.data(using: .utf8))
         case "proxy-only:socks-self-test":
             Task {
-                let port = SharedSettingsStore.shared.appSettings.lanSocksProxyPort
+                let port = SharedSettingsStore.shared.effectiveAppSettings.lanSocksProxyPort
                 let result = await ProxyOnlySocksSelfTest.probe(host: "127.0.0.1", port: port)
                 SharedLogger.shared.log(.proxyOnlySocksSelfTestExtension, detail: result.logDetail)
                 if result.handshakeOK {
@@ -779,7 +790,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// - Proxy Only: always starts (127.0.0.1, or Wi-Fi when LAN share is on).
     /// - Full VPN: only when Share Proxy on Local Network is enabled.
     private func startProxyBridge(using endpoints: PsiphonLocalProxyEndpoints, proxyOnly: Bool) async {
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.effectiveAppSettings
         guard proxyOnly || settings.shareProxyOnLocalNetworkEnabled else { return }
 
         let bindHost = resolveProxyBindHost(proxyOnly: proxyOnly, shareLAN: settings.shareProxyOnLocalNetworkEnabled)
@@ -855,7 +866,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func startLANProxy(using endpoints: PsiphonLocalProxyEndpoints) async {
         await startProxyBridge(
             using: endpoints,
-            proxyOnly: SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
+            proxyOnly: SharedSettingsStore.shared.effectiveAppSettings.proxyOnlyModeEnabled
         )
     }
 
@@ -887,7 +898,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         // Iran / custom / domain bypass: matching destination IPs leave through the device's normal
         // interface instead of the tunnel. iOS honors excludedRoutes at the IP layer.
         let store = SharedSettingsStore.shared
-        let appSettings = store.appSettings
+        let appSettings = store.effectiveAppSettings
         let bypassEnabled = appSettings.bypassIranIPsEnabled
         let (excluded, excludedBypassRoutes) = bypassEnabled
             ? Self.buildBypassExcludedRoutes()
@@ -960,6 +971,96 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             "TUNNEL_HTTP_PROXY",
             detail: "disabled native_packet_mode=true reason=packet_flow_is_authoritative"
         )
+#if false
+        // System HTTP proxy (matchDomains=[""]) makes iOS send ALL HTTP/HTTPS to the Psiphon loopback
+        // proxy. In this architecture that proxy also carries general internet / public-IP checks, so
+        // dropping it broke connectivity even though IP routes were applied.
+        //
+        // Default behavior now: ALWAYS keep the normal system proxy, exactly like bypass=false.
+        // excludedRoutes are applied best-effort — they bypass the VPN for traffic that rides
+        // tun2socks (raw sockets / non-proxy apps), while apps that honor the system HTTP proxy still
+        // go through the tunnel. The UI documents this.
+        //
+        // In DoH mode, proxy-aware apps are sent to a local bridge when it is available. The bridge
+        // resolves CONNECT hostnames through Secure DNS before dialing Psiphon SOCKS. If the bridge
+        // cannot bind and cleartext fallback is allowed, keep Psiphon's HTTP proxy so connecting the
+        // VPN does not cut internet access; strict Secure DNS fails closed instead.
+        // Strict IP bypass mode may also drop the proxy when there is at least one route to honor.
+        let strictMode = SharedSettingsStore.shared.effectiveAppSettings.bypassStrictModeEnabled
+        let disableProxyForBypass = bypassEnabled && strictMode && !excluded.isEmpty
+        let wantsSecureDnsBridge = SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: tunnelSettings)
+        let disableProxyForSecureDNS = SecureDNSConfiguration.isActive(tunnelSettings)
+            && !secureDnsSystemProxyActive
+            && tunnelSettings.blockCleartextDNS
+        if disableProxyForSecureDNS {
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_SYSTEM_PROXY",
+                detail: "disabled_bridge_unavailable block_cleartext=true mode=\(appSettings.secureDNSMode.rawValue) provider=\(appSettings.secureDNSProvider.rawValue)"
+            )
+            SharedLogger.shared.logRaw(
+                "TUNNEL_HTTP_PROXY",
+                detail: "disabled secure_dns=true block_cleartext=true bypass=\(bypassEnabled) routes=\(excluded.count)"
+            )
+        } else if endpoints.hasHttp && !disableProxyForBypass {
+            let proxy = NEProxySettings()
+            proxy.httpEnabled = true
+            proxy.httpsEnabled = true
+            proxy.excludeSimpleHostnames = false
+            proxy.matchDomains = [""]
+            let proxyPort = SecureDNSConfiguration.systemHTTPProxyPort(
+                for: tunnelSettings,
+                psiphonHttpPort: endpoints.httpPort,
+                bridgeActive: secureDnsSystemProxyActive
+            )
+            let server = NEProxyServer(address: endpoints.host, port: proxyPort)
+            proxy.httpServer = server
+            proxy.httpsServer = server
+            settings.proxySettings = proxy
+            if wantsSecureDnsBridge, secureDnsSystemProxyActive {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_PROXY",
+                    detail: "using_loopback_bridge port=\(proxyPort)"
+                )
+            } else if wantsSecureDnsBridge {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_PROXY",
+                    detail: "using_psiphon_http_fallback port=\(proxyPort) block_cleartext=false"
+                )
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FALLBACK",
+                    detail: "using_psiphon_http port=\(proxyPort) reason=bridge_unavailable"
+                )
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_bridge_unavailable block_cleartext=false"
+                )
+            } else if SecureDNSConfiguration.isActive(tunnelSettings) {
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_SYSTEM_PROXY",
+                    detail: "using_psiphon_http_keep_connectivity port=\(proxyPort) mode=\(tunnelSettings.secureDNSMode.rawValue)"
+                )
+                SharedLogger.shared.logRaw(
+                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
+                    detail: "reason=system_http_proxy_uses_psiphon_http secure_dns_mode=\(tunnelSettings.secureDNSMode.rawValue)"
+                )
+            }
+            SharedLogger.shared.logRaw(
+                "TUNNEL_HTTP_PROXY",
+                detail: "enabled host=\(endpoints.host) port=\(proxyPort) secure_dns_bridge=\(secureDnsSystemProxyActive) bypass=\(bypassEnabled) routes=\(excluded.count)"
+            )
+            if bypassEnabled && excluded.isEmpty {
+                SharedLogger.shared.log(
+                    .bypassIranNoListWarning,
+                    detail: "reason=zero_routes action=keep_system_proxy_normal_vpn"
+                )
+            }
+        } else if disableProxyForBypass {
+            SharedLogger.shared.log(
+                .bypassProxyDisabledForRoutes,
+                detail: "reason=strict_mode_enabled routes=\(excluded.count)"
+            )
+        }
+#endif
 
         return settings
     }
@@ -970,7 +1071,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     /// tunnel kept running. De-duplicates across all three sources and publishes the applied count.
     private static func buildBypassExcludedRoutes() -> (neRoutes: [NEIPv4Route], bypassRoutes: [BypassRoute]) {
         let store = SharedSettingsStore.shared
-        let settings = store.appSettings
+        let settings = store.effectiveAppSettings
         let messagingCompat = MessagingAppsConfiguration.usesMessagingOverlays(settings)
 
         var collected: [BypassRoute] = []

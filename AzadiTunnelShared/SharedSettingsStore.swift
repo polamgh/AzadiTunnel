@@ -139,18 +139,9 @@ final class SharedSettingsStore {
                   var settings = try? JSONDecoder().decode(AppSettings.self, from: data) else {
                 return AppSettings()
             }
-            if !settings.hasAcceptedConnectionDisclaimer && settings.hasAcceptedVPNDisclosure {
-                settings.hasAcceptedConnectionDisclaimer = true
-            }
-            if !settings.hasChosenLanguage,
-               settings.hasCompletedOnboarding || settings.preferredLanguage != .system {
-                settings.hasChosenLanguage = true
-            }
-            if settings.messagingAppsCompatibilityModeEnabled {
-                settings.messagingAppsCompatibilityModeEnabled = false
-                if let encoded = try? JSONEncoder().encode(settings) {
-                    defaults.set(encoded, forKey: AppGroupConstants.appSettingsKey)
-                }
+            var didMigrate = SharedSettingsMigration.migrate(&settings)
+            if didMigrate, let encoded = try? JSONEncoder().encode(settings) {
+                defaults.set(encoded, forKey: AppGroupConstants.appSettingsKey)
             }
             return settings
         }
@@ -327,7 +318,7 @@ final class SharedSettingsStore {
         set { defaults?.set(newValue, forKey: AppGroupConstants.bypassRoutesAppliedCountKey) }
     }
 
-    /// Shown in Secure DNS settings when `blockCleartextDNS` prevents fallback after resolver failure.
+    /// Shown in Secure DNS settings when an encrypted resolver fails and DNS is fail-closed.
     var secureDNSWarning: String? {
         get { defaults?.string(forKey: AppGroupConstants.secureDNSWarningKey) }
         set {

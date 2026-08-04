@@ -19,14 +19,11 @@ struct SecureDNSSettingsView: View {
             Form {
                 noteSection
                 modeSection
-                if settings.secureDNSMode != .off {
-                    providerSection
-                    if settings.secureDNSProvider == .custom {
-                        customSection
-                    }
-                    blockSection
-                    testSection
+                providerSection
+                if settings.secureDNSProvider == .custom {
+                    customSection
                 }
+                testSection
                 if let warningText, !warningText.isEmpty {
                     warningSection(warningText)
                 }
@@ -71,14 +68,12 @@ struct SecureDNSSettingsView: View {
 
     private var modeSection: some View {
         Section {
-            if settings.secureDNSMode != .off {
-                HStack {
-                    Text(L10n.t(.secureDnsActiveSelection))
-                    Spacer()
-                    Text(activeSelectionSummary)
-                        .foregroundStyle(AppTheme.accent)
-                        .multilineTextAlignment(.trailing)
-                }
+            HStack {
+                Text(L10n.t(.secureDnsActiveSelection))
+                Spacer()
+                Text(activeSelectionSummary)
+                    .foregroundStyle(AppTheme.accent)
+                    .multilineTextAlignment(.trailing)
             }
 
             ForEach(SecureDNSMode.allCases) { mode in
@@ -103,33 +98,11 @@ struct SecureDNSSettingsView: View {
 
     private var customSection: some View {
         Section {
-            if settings.secureDNSMode == .doh {
-                TextField(L10n.t(.secureDnsCustomDoHURL), text: $settings.customDoHURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .onChange(of: settings.customDoHURL) { _ in persist("secure_dns_custom_doh") }
-            }
-            if settings.secureDNSMode == .dot {
-                TextField(L10n.t(.secureDnsCustomDoTHost), text: $settings.customDoTHost)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .onChange(of: settings.customDoTHost) { _ in persist("secure_dns_custom_dot") }
-            }
-        }
-    }
-
-    private var blockSection: some View {
-        Section {
-            Toggle(L10n.t(.secureDnsBlockCleartext), isOn: $settings.blockCleartextDNS)
-                .onChange(of: settings.blockCleartextDNS) { _ in
-                    persist("secure_dns_block_cleartext")
-                    Task { await reconnectIfConnected() }
-                }
-                .accessibilityIdentifier("secureDnsBlockCleartextToggle")
-            Text(L10n.t(.secureDnsBlockCleartextHint))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            TextField(L10n.t(.secureDnsCustomDoHURL), text: $settings.customDoHURL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .keyboardType(.URL)
+                .onChange(of: settings.customDoHURL) { _ in persist("secure_dns_custom_doh") }
         }
     }
 
@@ -146,7 +119,7 @@ struct SecureDNSSettingsView: View {
                     Text(testRunning ? L10n.t(.secureDnsTestRunning) : L10n.t(.secureDnsTestButton))
                 }
             }
-            .disabled(testRunning || settings.secureDNSMode == .off)
+            .disabled(testRunning)
             .accessibilityIdentifier("secureDnsTestButton")
             if !testSummary.isEmpty {
                 Text(testSummary)
@@ -253,7 +226,7 @@ struct SecureDNSSettingsView: View {
         switch mode {
         case .off: return "power"
         case .doh: return "lock.shield"
-        case .dot: return "network.badge.shield.half.filled"
+        case .dot: return "lock.shield"
         }
     }
 
@@ -271,7 +244,7 @@ struct SecureDNSSettingsView: View {
         switch mode {
         case .off: return L10n.t(.secureDnsModeOff)
         case .doh: return L10n.t(.secureDnsModeDoh)
-        case .dot: return L10n.t(.secureDnsModeDot)
+        case .dot: return L10n.t(.secureDnsModeDoh)
         }
     }
 
@@ -279,7 +252,7 @@ struct SecureDNSSettingsView: View {
         switch mode {
         case .off: return L10n.t(.secureDnsModeOffDetail)
         case .doh: return L10n.t(.secureDnsModeDohDetail)
-        case .dot: return L10n.t(.secureDnsModeDotDetail)
+        case .dot: return L10n.t(.secureDnsModeDohDetail)
         }
     }
 
@@ -309,10 +282,8 @@ struct SecureDNSSettingsView: View {
 
     private func persist(_ key: String) {
         SharedSettingsStore.shared.updateAppSettings(settings, logKey: key)
-        if settings.secureDNSMode == .off {
-            SharedSettingsStore.shared.secureDNSWarning = nil
-            warningText = nil
-        }
+        SharedSettingsStore.shared.secureDNSWarning = nil
+        warningText = nil
     }
 
     private func refresh() {
@@ -339,7 +310,6 @@ struct SecureDNSSettingsView: View {
     }
 
     private func runTest() async {
-        guard settings.secureDNSMode != .off else { return }
         guard vpn.status == .connected else {
             testSummary = L10n.t(.secureDnsTestConnectFirst)
             presentToast(L10n.t(.secureDnsTestConnectFirst))

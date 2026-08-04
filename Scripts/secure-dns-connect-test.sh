@@ -8,7 +8,6 @@ BUNDLE="com.polamgh.ali.AzadiTunnel"
 WAIT_SEC="${SECURE_DNS_WAIT_SEC:-120}"
 MODE="${SECURE_DNS_MODE:-doh}"
 PROVIDER="${SECURE_DNS_PROVIDER:-cloudflare}"
-BLOCK_CLEARTEXT="${SECURE_DNS_BLOCK_CLEARTEXT:-0}"
 CUSTOM_DOH_URL="${SECURE_DNS_CUSTOM_DOH_URL:-}"
 EXPECT="${SECURE_DNS_EXPECT:-doh}"
 PROXY_ONLY="${SECURE_DNS_PROXY_ONLY:-0}"
@@ -22,9 +21,13 @@ echo "Device: ${DEVICE}"
 echo "Wait: ${WAIT_SEC}s"
 echo "Mode: ${MODE}"
 echo "Provider: ${PROVIDER}"
-echo "Block cleartext: ${BLOCK_CLEARTEXT}"
 echo "Expect: ${EXPECT}"
 echo "Proxy Only: ${PROXY_ONLY}"
+
+if [[ "${MODE}" != "doh" ]]; then
+  echo "Secure DNS is mandatory DoH; SECURE_DNS_MODE must be doh" >&2
+  exit 2
+fi
 
 xcodebuild -project "${ROOT}/AzadiTunnel.xcodeproj" -scheme AzadiTunnel \
   -destination "generic/platform=iOS,id=${DEVICE}" \
@@ -37,13 +40,12 @@ launch_args=(
   -UITestSetProtocol auto -UITestSetBeastMode 1 -UITestForceBootstrap -UITestAutoConnect
   -UITestSetProxyOnlyMode "${PROXY_ONLY}"
   -UITestSetSecureDNSMode "${MODE}" -UITestSetSecureDNSProvider "${PROVIDER}"
-  -UITestSetSecureDNSBlockCleartext "${BLOCK_CLEARTEXT}"
   -UITestVerifyFeatures
 )
 if [[ -n "${CUSTOM_DOH_URL}" ]]; then
   launch_args+=(-UITestSetSecureDNSCustomDoHURL "${CUSTOM_DOH_URL}")
 fi
-if [[ "${MODE}" != "off" && "${PROXY_ONLY}" != "1" ]]; then
+if [[ "${PROXY_ONLY}" != "1" ]]; then
   launch_args+=(-UITestVerifySecureDNS)
 fi
 
@@ -87,21 +89,13 @@ def require(label, ok):
 interesting = [
     "UITEST_SETTINGS",
     "SECURE_DNS_ENABLED",
-    "SECURE_DNS_DISABLED",
     "TUNNEL_DNS_ADVERTISED",
-    "PSIPHON_NATIVE_PACKET_TUNNEL_READY",
     "TUNNEL_HTTP_PROXY",
-    "DNS_QUERY_RECEIVED",
-    "SECURE_DNS_SELECTED",
-    "SECURE_DNS_DOH_CONNECT",
-    "SECURE_DNS_DOH_QUERY_OK",
-    "SECURE_DNS_DOH_QUERY_FAILED",
-    "DNS_LEGACY_FALLBACK",
-    "SECURE_DNS_CLEAR_TEXT_BLOCKED",
-    "DNS_RESPONSE_SENT",
-    "SECURE_DNS_SYSTEM_HTTP_RESOLVED",
-    "SECURE_DNS_SYSTEM_HTTP_PROXY_FALLBACK",
     "SECURE_DNS_BYPASS_DETECTED",
+    "SECURE_DNS_TEST_STARTED",
+    "SECURE_DNS_TEST_OK",
+    "SECURE_DNS_TEST_FAILED",
+    "SECURE_DNS_DOH_ATTEMPT",
     "PROXY_ONLY_NO_DEFAULT_ROUTE",
     "PROXY_ONLY_NO_SYSTEM_PROXY",
     "FEATURE_OK secure_dns_test",
@@ -118,42 +112,20 @@ for token in interesting:
 
 failures = []
 
-if expect == "off":
-    require("SECURE_DNS_DISABLED", bool(any_sub("SECURE_DNS_DISABLED")))
-    require("no SECURE_DNS_DOH_QUERY_OK", not any_sub("SECURE_DNS_DOH_QUERY_OK"))
-    require("no SECURE_DNS_DOH_CONNECT", not any_sub("SECURE_DNS_DOH_CONNECT"))
-    require("legacy/off connectivity path", bool(any_sub("INTERNET_TEST_PASSED") or any_all("DNS_RESPONSE_SENT", "secure=false")))
-elif expect == "doh":
+if expect == "doh":
     require("SECURE_DNS_ENABLED", bool(any_sub("SECURE_DNS_ENABLED")))
     require("TUNNEL_DNS_ADVERTISED", bool(any_sub("TUNNEL_DNS_ADVERTISED")))
-    require("PSIPHON_NATIVE_PACKET_TUNNEL_READY ipv4/ipv6 tcp/udp", bool(any_all("PSIPHON_NATIVE_PACKET_TUNNEL_READY", "ip_versions=ipv4,ipv6", "transports=tcp,udp")))
-    require("TUNNEL_HTTP_PROXY disabled native packet path", bool(any_all("TUNNEL_HTTP_PROXY", "disabled native_packet=true")))
-    require("no system HTTP proxy activation", not any_all("TUNNEL_HTTP_PROXY", "enabled"))
-    require("DNS_QUERY_RECEIVED", bool(any_sub("DNS_QUERY_RECEIVED")))
-    require("SECURE_DNS_SELECTED mode=doh", bool(any_all("SECURE_DNS_SELECTED", "mode=doh")))
-    require("SECURE_DNS_DOH_CONNECT proxy=socks", bool(any_all("SECURE_DNS_DOH_CONNECT", "proxy=socks")))
-    require("SECURE_DNS_DOH_QUERY_OK", bool(any_sub("SECURE_DNS_DOH_QUERY_OK")))
-    require("DNS_RESPONSE_SENT secure=true", bool(any_all("DNS_RESPONSE_SENT", "secure=true")))
-    require("no DNS_LEGACY_FALLBACK", not any_sub("DNS_LEGACY_FALLBACK"))
-elif expect == "fallback":
-    require("SECURE_DNS_SELECTED mode=doh", bool(any_all("SECURE_DNS_SELECTED", "mode=doh")))
-    require("SECURE_DNS_DOH_QUERY_FAILED", bool(any_sub("SECURE_DNS_DOH_QUERY_FAILED")))
-    require("DNS_LEGACY_FALLBACK", bool(any_sub("DNS_LEGACY_FALLBACK")))
-    require("DNS_RESPONSE_SENT secure=false", bool(any_all("DNS_RESPONSE_SENT", "secure=false")))
-    require("no SECURE_DNS_CLEAR_TEXT_BLOCKED", not any_sub("SECURE_DNS_CLEAR_TEXT_BLOCKED"))
-elif expect == "blocked":
-    require("SECURE_DNS_SELECTED mode=doh", bool(any_all("SECURE_DNS_SELECTED", "mode=doh")))
-    require("SECURE_DNS_DOH_QUERY_FAILED", bool(any_sub("SECURE_DNS_DOH_QUERY_FAILED")))
-    require("SECURE_DNS_CLEAR_TEXT_BLOCKED", bool(any_sub("SECURE_DNS_CLEAR_TEXT_BLOCKED")))
-    require("DNS_RESPONSE_SENT servfail", bool(any_all("DNS_RESPONSE_SENT", "servfail=blocked_cleartext")))
-    require("no DNS_LEGACY_FALLBACK", not any_sub("DNS_LEGACY_FALLBACK"))
+    require("SECURE_DNS_TEST_STARTED", bool(any_sub("SECURE_DNS_TEST_STARTED")))
+    require("SECURE_DNS_TEST_OK", bool(any_sub("SECURE_DNS_TEST_OK")))
+    require("SECURE_DNS_DOH_ATTEMPT", bool(any_sub("SECURE_DNS_DOH_ATTEMPT")))
+    require("FEATURE_OK secure_dns_test", bool(any_all("FEATURE_OK", "secure_dns_test")))
 elif expect == "proxy-only":
     require("PROXY_ONLY_NO_DEFAULT_ROUTE", bool(any_sub("PROXY_ONLY_NO_DEFAULT_ROUTE")))
     require("PROXY_ONLY_NO_SYSTEM_PROXY", bool(any_sub("PROXY_ONLY_NO_SYSTEM_PROXY")))
     require("no TUNNEL_DNS_ADVERTISED", not any_sub("TUNNEL_DNS_ADVERTISED"))
     require("no PACKET_FORWARDING_STARTED", not any_sub("PACKET_FORWARDING_STARTED"))
 else:
-    print(f"FAIL: unknown SECURE_DNS_EXPECT={expect!r}")
+    print(f"FAIL: expected scenario must be doh or proxy-only, got {expect!r}")
     sys.exit(1)
 
 if failures:

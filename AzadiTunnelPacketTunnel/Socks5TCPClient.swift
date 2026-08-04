@@ -48,32 +48,6 @@ enum Socks5TCPClient {
         return hostnameOverrides[host.lowercased()] ?? host
     }
 
-    /// DNS query over TCP (RFC 7766) via SOCKS to a resolver outside tunnel DNS IPs.
-    static func tcpDnsQuery(
-        query: Data,
-        resolverIPv4: String = "9.9.9.9",
-        proxyHost: String = "127.0.0.1",
-        proxyPort: Int
-    ) async throws -> Data {
-        let connection = try await openConnection(
-            proxyHost: proxyHost,
-            proxyPort: proxyPort,
-            targetHost: resolverIPv4,
-            targetPort: 53
-        )
-        defer { connection.cancel() }
-        var framed = Data()
-        let len = UInt16(query.count)
-        framed.append(UInt8(len >> 8))
-        framed.append(UInt8(len & 0xff))
-        framed.append(query)
-        try await sendAll(connection, data: framed)
-        let lenHeader = try await receiveExact(connection, count: 2, timeout: 8)
-        let respLen = Int(UInt16(lenHeader[0]) << 8 | UInt16(lenHeader[1]))
-        guard respLen > 0, respLen <= 4096 else { throw Socks5Error.connectFailed }
-        return try await receiveExact(connection, count: respLen, timeout: 8)
-    }
-
     /// HTTP GET to `host` through Psiphon SOCKS (full CONNECT reply consumed before reading body).
     static func httpGet(
         path: String,
@@ -105,7 +79,8 @@ enum Socks5TCPClient {
         readyTimeout: TimeInterval = 5,
         methodTimeout: TimeInterval = 5,
         connectReplyTimeout: TimeInterval = 8,
-        diagnostics: TcpRelayDiagnostics.SessionContext? = nil
+        diagnostics: TcpRelayDiagnostics.SessionContext? = nil,
+        deadline: SecureDNSDeadline? = nil
     ) async throws -> NWConnection {
         let timeouts = MessagingAppsConfiguration.socksRelayTimeouts(for: targetHost, port: targetPort)
         let readyTO = readyTimeout == 5 ? timeouts.ready : readyTimeout
@@ -127,7 +102,8 @@ enum Socks5TCPClient {
                 readyTO: readyTO,
                 methodTO: methodTO,
                 connectTO: connectTO,
-                diagnostics: diagnostics
+                diagnostics: diagnostics,
+                deadline: deadline
             )
         } catch {
             guard httpPort > 0, shouldTryHttpConnectFallback(host: targetHost, port: targetPort) else {
@@ -169,57 +145,94 @@ enum Socks5TCPClient {
         readyTO: TimeInterval,
         methodTO: TimeInterval,
         connectTO: TimeInterval,
-        diagnostics: TcpRelayDiagnostics.SessionContext?
+        diagnostics: TcpRelayDiagnostics.SessionContext?,
+        deadline: SecureDNSDeadline?
     ) async throws -> NWConnection {
         let endpoint = NWEndpoint.hostPort(
             host: NWEndpoint.Host(proxyHost),
             port: NWEndpoint.Port(integerLiteral: UInt16(proxyPort))
         )
         let connection = NWConnection(to: endpoint, using: connectionParameters(for: targetHost, port: targetPort))
-        let readyStarted = Date()
-        try await waitReady(connection, timeout: readyTO)
-        diagnostics?.log(
-            "TCP_RELAY_SOCKS_READY",
-            detail: "ms=\(Int(Date().timeIntervalSince(readyStarted) * 1000))"
-        )
-
-        try await sendAll(connection, data: Data([0x05, 0x01, 0x00]))
-        let methodReply = try await receiveExact(connection, count: 2, timeout: methodTO)
-        guard methodReply[0] == 0x05, methodReply[1] == 0x00 else {
+        do {
+            let readyStarted = SecureDNSMonotonicClock.now
+            try Task.checkCancellation()
+            try await waitReady(connection, timeout: boundedTimeout(readyTO, deadline: deadline, stage: "ready"))
             diagnostics?.log(
-                "TCP_RELAY_SOCKS_METHOD_FAIL",
-                detail: "rep=\(methodReply.map { String($0) }.joined(separator: ","))"
+                "TCP_RELAY_SOCKS_READY",
+                detail: "ms=\(Int((SecureDNSMonotonicClock.now - readyStarted) * 1000))"
             )
-            SharedLogger.shared.log(.internetTestFailed, detail: "socks_method rep=\(methodReply.map { String($0) }.joined(separator: ","))")
-            throw Socks5Error.handshakeFailed
-        }
-        diagnostics?.log("TCP_RELAY_SOCKS_METHOD_OK", detail: "auth=none")
 
-        let connectHost = useHostOverrides ? socksTargetHost(for: targetHost) : targetHost
-        var connect = Data([0x05, 0x01, 0x00])
-        if let ipv4 = parseIPv4(connectHost) {
-            connect.append(contentsOf: [0x01])
-            connect.append(contentsOf: ipv4)
-        } else {
-            connect.append(0x03)
-            guard let hostData = connectHost.data(using: .utf8) else { throw Socks5Error.connectFailed }
-            connect.append(UInt8(hostData.count))
-            connect.append(hostData)
+            try Task.checkCancellation()
+            try await sendAll(
+                connection,
+                data: Data([0x05, 0x01, 0x00]),
+                timeout: boundedTimeout(methodTO, deadline: deadline, stage: "method_send")
+            )
+            let methodReply = try await receiveExact(
+                connection,
+                count: 2,
+                timeout: boundedTimeout(methodTO, deadline: deadline, stage: "method")
+            )
+            guard methodReply[0] == 0x05, methodReply[1] == 0x00 else {
+                diagnostics?.log(
+                    "TCP_RELAY_SOCKS_METHOD_FAIL",
+                    detail: "rep=\(methodReply.map { String($0) }.joined(separator: ","))"
+                )
+                SharedLogger.shared.log(.internetTestFailed, detail: "socks_method rep=\(methodReply.map { String($0) }.joined(separator: ","))")
+                throw Socks5Error.handshakeFailed
+            }
+            diagnostics?.log("TCP_RELAY_SOCKS_METHOD_OK", detail: "auth=none")
+
+            let connectHost = useHostOverrides ? socksTargetHost(for: targetHost) : targetHost
+            var connect = Data([0x05, 0x01, 0x00])
+            if let ipv4 = parseIPv4(connectHost) {
+                connect.append(contentsOf: [0x01])
+                connect.append(contentsOf: ipv4)
+            } else {
+                connect.append(0x03)
+                guard let hostData = connectHost.data(using: .utf8), hostData.count <= 255 else {
+                    throw Socks5Error.connectFailed
+                }
+                connect.append(UInt8(hostData.count))
+                connect.append(hostData)
+            }
+            connect.append(UInt8(targetPort >> 8))
+            connect.append(UInt8(targetPort & 0xff))
+            let connectStarted = SecureDNSMonotonicClock.now
+            diagnostics?.log(
+                "TCP_RELAY_SOCKS_CONNECT_SENT",
+                detail: "target=\(connectHost):\(targetPort) overridden=\(connectHost != targetHost)"
+            )
+            try Task.checkCancellation()
+            try await sendAll(
+                connection,
+                data: connect,
+                timeout: boundedTimeout(connectTO, deadline: deadline, stage: "connect_send")
+            )
+            try await consumeConnectReply(
+                connection,
+                timeout: boundedTimeout(connectTO, deadline: deadline, stage: "connect_reply")
+            )
+            diagnostics?.log(
+                "TCP_RELAY_SOCKS_CONNECT_OK",
+                detail: "ms=\(Int((SecureDNSMonotonicClock.now - connectStarted) * 1000))"
+            )
+            return connection
+        } catch {
+            connection.cancel()
+            throw error
         }
-        connect.append(UInt8(targetPort >> 8))
-        connect.append(UInt8(targetPort & 0xff))
-        let connectStarted = Date()
-        diagnostics?.log(
-            "TCP_RELAY_SOCKS_CONNECT_SENT",
-            detail: "target=\(connectHost):\(targetPort) overridden=\(connectHost != targetHost)"
-        )
-        try await sendAll(connection, data: connect)
-        try await consumeConnectReply(connection, timeout: connectTO)
-        diagnostics?.log(
-            "TCP_RELAY_SOCKS_CONNECT_OK",
-            detail: "ms=\(Int(Date().timeIntervalSince(connectStarted) * 1000))"
-        )
-        return connection
+    }
+
+    private static func boundedTimeout(
+        _ base: TimeInterval,
+        deadline: SecureDNSDeadline?,
+        stage: String
+    ) throws -> TimeInterval {
+        guard let deadline else { return base }
+        let remaining = deadline.remaining
+        guard remaining > 0.05 else { throw Socks5Error.timeout(stage) }
+        return min(base, remaining)
     }
 
     private static func openViaHttpConnect(
@@ -235,8 +248,9 @@ enum Socks5TCPClient {
             port: NWEndpoint.Port(integerLiteral: UInt16(httpPort)),
             using: connectionParameters(for: targetHost, port: targetPort)
         )
-        let readyStarted = Date()
-        try await waitReady(connection, timeout: min(15, connectTO))
+        let readyStarted = SecureDNSMonotonicClock.now
+        let deadline = SecureDNSDeadline(after: min(15, connectTO))
+        try await waitReady(connection, timeout: max(0.05, deadline.remaining))
         let authority = targetPort == 80 || targetPort == 443
             ? targetHost
             : "\(targetHost):\(targetPort)"
@@ -244,15 +258,18 @@ enum Socks5TCPClient {
             "CONNECT \(authority) HTTP/1.1\r\n" +
             "Host: \(authority)\r\n" +
             "Proxy-Connection: keep-alive\r\n\r\n"
-        try await sendAll(connection, data: Data(request.utf8))
+        try await sendAll(
+            connection,
+            data: Data(request.utf8),
+            timeout: max(0.05, deadline.remaining)
+        )
 
         var head = Data()
-        let deadline = Date().addingTimeInterval(connectTO)
-        while head.count < 16 * 1024, Date() < deadline {
+        while head.count < 16 * 1024, deadline.remaining > 0.05 {
             let chunk = try await relayReceive(
                 connection,
                 maxLength: min(4096, 16 * 1024 - head.count),
-                timeout: max(0.5, min(connectTO, deadline.timeIntervalSinceNow))
+                timeout: max(0.05, min(8, deadline.remaining))
             )
             head.append(chunk)
             if head.range(of: Data("\r\n\r\n".utf8)) != nil { break }
@@ -268,7 +285,7 @@ enum Socks5TCPClient {
         }
         diagnostics?.log(
             "TCP_RELAY_HTTP_CONNECT_OK",
-            detail: "target=\(targetHost):\(targetPort) ms=\(Int(Date().timeIntervalSince(readyStarted) * 1000))"
+            detail: "target=\(targetHost):\(targetPort) ms=\(Int((SecureDNSMonotonicClock.now - readyStarted) * 1000))"
         )
         MessagingAppsDiagnostics.logTcpRelay(
             host: targetHost,
@@ -325,61 +342,86 @@ enum Socks5TCPClient {
     }
 
     static func relayReceive(_ connection: NWConnection, maxLength: Int, timeout: TimeInterval? = nil) async throws -> Data {
-        try await withCheckedThrowingContinuation { cont in
-            let gate = ContinuationGate<Data>()
-            if let timeout {
-                gate.scheduleTimeout(after: timeout) {
-                    connection.cancel()
-                    _ = gate.resume(cont, throwing: Socks5Error.timeout("receive"))
+        try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { cont in
+                let gate = ContinuationGate<Data>()
+                if let timeout {
+                    gate.scheduleTimeout(after: timeout) {
+                        connection.cancel()
+                        _ = gate.resume(cont, throwing: Socks5Error.timeout("receive"))
+                    }
+                }
+                connection.receive(minimumIncompleteLength: 1, maximumLength: maxLength) { data, _, _, err in
+                    if let err {
+                        _ = gate.resume(cont, throwing: err)
+                    } else if let data, !data.isEmpty {
+                        _ = gate.resume(cont, returning: data)
+                    } else {
+                        _ = gate.resume(cont, throwing: Socks5Error.remoteClosed)
+                    }
                 }
             }
-            connection.receive(minimumIncompleteLength: 1, maximumLength: maxLength) { data, _, _, err in
-                if let err {
-                    _ = gate.resume(cont, throwing: err)
-                } else if let data, !data.isEmpty {
-                    _ = gate.resume(cont, returning: data)
-                } else {
-                    _ = gate.resume(cont, throwing: Socks5Error.remoteClosed)
-                }
-            }
-        }
+        }, onCancel: {
+            connection.cancel()
+        })
     }
 
     private static func waitReady(_ connection: NWConnection, timeout: TimeInterval? = nil) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            let gate = ContinuationGate<Void>()
-            if let timeout {
-                gate.scheduleTimeout(after: timeout) {
-                    connection.stateUpdateHandler = nil
-                    connection.cancel()
-                    _ = gate.resume(cont, throwing: Socks5Error.timeout("ready"))
+        try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                let gate = ContinuationGate<Void>()
+                if let timeout {
+                    gate.scheduleTimeout(after: timeout) {
+                        connection.stateUpdateHandler = nil
+                        connection.cancel()
+                        _ = gate.resume(cont, throwing: Socks5Error.timeout("ready"))
+                    }
                 }
-            }
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    connection.stateUpdateHandler = nil
-                    _ = gate.resume(cont, returning: ())
-                case .failed(let err):
-                    connection.stateUpdateHandler = nil
-                    _ = gate.resume(cont, throwing: err)
-                case .cancelled:
-                    connection.stateUpdateHandler = nil
-                    _ = gate.resume(cont, throwing: Socks5Error.connectionCancelled)
-                default:
-                    break
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        connection.stateUpdateHandler = nil
+                        _ = gate.resume(cont, returning: ())
+                    case .failed(let err):
+                        connection.stateUpdateHandler = nil
+                        _ = gate.resume(cont, throwing: err)
+                    case .cancelled:
+                        connection.stateUpdateHandler = nil
+                        _ = gate.resume(cont, throwing: Socks5Error.connectionCancelled)
+                    default:
+                        break
+                    }
                 }
+                connection.start(queue: .global(qos: .userInitiated))
             }
-            connection.start(queue: .global(qos: .userInitiated))
-        }
+        }, onCancel: {
+            connection.stateUpdateHandler = nil
+            connection.cancel()
+        })
     }
 
-    private static func sendAll(_ connection: NWConnection, data: Data) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            connection.send(content: data, completion: .contentProcessed { err in
-                if let err { cont.resume(throwing: err) } else { cont.resume() }
-            })
-        }
+    private static func sendAll(
+        _ connection: NWConnection,
+        data: Data,
+        timeout: TimeInterval? = nil
+    ) async throws {
+        try await withTaskCancellationHandler(operation: {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                let gate = ContinuationGate<Void>()
+                if let timeout {
+                    gate.scheduleTimeout(after: timeout) {
+                        connection.cancel()
+                        _ = gate.resume(cont, throwing: Socks5Error.timeout("send"))
+                    }
+                }
+                connection.send(content: data, completion: .contentProcessed { err in
+                    if let err { _ = gate.resume(cont, throwing: err) }
+                    else { _ = gate.resume(cont, returning: ()) }
+                })
+            }
+        }, onCancel: {
+            connection.cancel()
+        })
     }
 
     private static func receiveExact(_ connection: NWConnection, count: Int, timeout: TimeInterval? = nil) async throws -> Data {
@@ -393,9 +435,13 @@ enum Socks5TCPClient {
 
     private static func readHttpBody(_ connection: NWConnection) async throws -> Data {
         var buffer = Data()
-        let deadline = Date().addingTimeInterval(20)
-        while buffer.count < 65536, Date() < deadline {
-            let chunk = try await relayReceive(connection, maxLength: 4096, timeout: 8)
+        let deadline = SecureDNSDeadline(after: 20)
+        while buffer.count < 65536, deadline.remaining > 0.05 {
+            let chunk = try await relayReceive(
+                connection,
+                maxLength: 4096,
+                timeout: min(8, max(0.05, deadline.remaining))
+            )
             if chunk.isEmpty { break }
             buffer.append(chunk)
             if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {

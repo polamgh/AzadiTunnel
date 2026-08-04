@@ -67,19 +67,15 @@ struct AzadiTunnelApp: App {
                 settings.fallbackTimeoutDirect = 120
             }
             let secureDnsModeRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSMode")
-            if let secureDnsModeRaw,
-               let mode = SecureDNSMode(rawValue: secureDnsModeRaw) {
-                settings.secureDNSMode = mode
+            if secureDnsModeRaw != nil {
+                // Legacy UI-test invocations may still pass "off" or "dot". They are accepted
+                // as input for migration coverage, but the runtime setting is always DoH.
+                settings.secureDNSMode = .doh
             }
             let secureDnsProviderRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSProvider")
             if let secureDnsProviderRaw,
                let provider = SecureDNSProvider(rawValue: secureDnsProviderRaw) {
                 settings.secureDNSProvider = provider
-            }
-            let secureDnsBlockRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSBlockCleartext")
-                ?? ProcessInfo.processInfo.environment["UITEST_SECURE_DNS_BLOCK_CLEARTEXT"]
-            if let secureDnsBlockRaw {
-                settings.blockCleartextDNS = secureDnsBlockRaw == "1" || secureDnsBlockRaw.lowercased() == "true"
             }
             let secureDnsCustomDoH = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSCustomDoHURL")
                 ?? ProcessInfo.processInfo.environment["UITEST_SECURE_DNS_CUSTOM_DOH_URL"]
@@ -95,7 +91,7 @@ struct AzadiTunnelApp: App {
             )
             SharedLogger.shared.logRaw(
                 "UITEST_SETTINGS",
-                detail: "protocol=\(settings.protocolSelection.rawValue) beast=\(settings.beastModeEnabled) proxy_only=\(settings.proxyOnlyModeEnabled) secure_dns=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue) block_cleartext=\(settings.blockCleartextDNS) limits=\(limits)"
+                detail: "protocol=\(settings.protocolSelection.rawValue) beast=\(settings.beastModeEnabled) proxy_only=\(settings.proxyOnlyModeEnabled) secure_dns=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue) limits=\(limits)"
             )
         }
         let forceBootstrap = args.contains("-UITestAutoConnect") || args.contains("-UITestForceBootstrap")

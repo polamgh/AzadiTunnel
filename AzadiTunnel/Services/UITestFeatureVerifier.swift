@@ -66,11 +66,6 @@ enum UITestFeatureVerifier {
             "SECURE_DNS_UITEST",
             detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue)"
         )
-        guard settings.secureDNSMode != .off else {
-            SharedLogger.shared.logRaw("FEATURE_FAIL", detail: "secure_dns_mode_off")
-            return
-        }
-
         guard await waitForExtensionReady(timeout: 90) else {
             SharedLogger.shared.logRaw("FEATURE_FAIL", detail: "secure_dns_extension_not_ready")
             return

@@ -226,18 +226,14 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 if !proxyOnly {
                     SecureDNSConfiguration.logStartupStatus(SharedSettingsStore.shared.tunnelEffectiveAppSettings)
                     bridge?.setDNSHandler { [weak self] packet, protocolNumber in
-                        guard let self,
-                              let dnsEndpoints = self.engine?.localProxyEndpoints,
-                              dnsEndpoints.hasSocks else {
-                            return false
-                        }
+                        guard let self else { return true }
+                        let dnsEndpoints = self.engine?.localProxyEndpoints
                         return TunnelDnsForwarder.handleIfDnsQuery(
                             packet: packet,
                             protocolNumber: protocolNumber,
                             packetFlow: self.packetFlow,
-                            socksHost: dnsEndpoints.host,
-                            socksPort: dnsEndpoints.socksPort,
-                            httpPort: dnsEndpoints.httpPort,
+                            socksHost: dnsEndpoints?.host ?? "127.0.0.1",
+                            socksPort: dnsEndpoints?.socksPort ?? 0,
                             packetEngineCapabilities: packetEngineCapabilities
                         )
                     }
@@ -378,127 +374,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-#if false
-    private func startSecureDnsSystemProxyIfUsable(
-        settings: AppSettings,
-        endpoints: PsiphonLocalProxyEndpoints
-    ) async -> Bool {
-        let upstream = LANProxyBridge.Endpoints(
-            psiphonHost: endpoints.host,
-            psiphonHttpPort: endpoints.httpPort,
-            psiphonSocksPort: endpoints.socksPort
-        )
-        guard await secureDnsSystemProxy.startLoopbackHTTPProxy(upstream: upstream) else {
-            return false
-        }
-
-        let query = SecureDNSConfiguration.exampleComWireQuery
-        let queryId = SecureDNSResolver.queryId(from: query)
-        guard let endpoint = SecureDNSConfiguration.dohEndpoint(for: settings) else {
-            secureDnsSystemProxy.stopLoopbackHTTPProxy()
-            SharedLogger.shared.logRaw(
-                "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
-                detail: "reason=no_doh_endpoint mode=\(settings.secureDNSMode.rawValue)"
-            )
-            return false
-        }
-
-        do {
-            let payload = try await SecureDNSDoHClient.post(
-                endpoint: endpoint,
-                provider: settings.secureDNSProvider,
-                wireQuery: query,
-                socksPort: endpoints.socksPort,
-                httpPort: endpoints.httpPort,
-                queryId: queryId,
-                qname: "example.com"
-            )
-            _ = try SecureDNSResolver.validateDNSWireResponse(payload, expectedId: queryId)
-            SharedLogger.shared.logRaw(
-                "SECURE_DNS_SYSTEM_HTTP_PROXY_READY",
-                detail: "secure_dns_probe=ok provider=\(settings.secureDNSProvider.rawValue)"
-            )
-            return true
-        } catch {
-            secureDnsSystemProxy.stopLoopbackHTTPProxy()
-            SharedLogger.shared.logRaw(
-                "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
-                detail: "reason=doh_probe_failed provider=\(settings.secureDNSProvider.rawValue) error=\(error.localizedDescription)"
-            )
-            if settings.blockCleartextDNS {
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_PROXY",
-                    detail: "disabled_bridge_probe_failed block_cleartext=true mode=\(settings.secureDNSMode.rawValue)"
-                )
-            } else {
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FALLBACK",
-                    detail: "using_psiphon_http reason=doh_probe_failed block_cleartext=false"
-                )
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
-                    detail: "reason=system_http_bridge_doh_probe_failed block_cleartext=false"
-                )
-            }
-            return false
-        }
-    }
-
-    private func startSecureDnsSystemProxyActivationIfNeeded(
-        settings: AppSettings,
-        endpoints: PsiphonLocalProxyEndpoints,
-        packetEngineCapabilities: PacketEngineCapabilities,
-        proxyOnly: Bool
-    ) {
-        secureDnsSystemProxyTask?.cancel()
-        guard !proxyOnly,
-              settings.secureDNSMode == .doh,
-              SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: settings) else {
-            return
-        }
-
-        secureDnsSystemProxyTask = Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            guard !Task.isCancelled else { return }
-
-            SharedLogger.shared.logRaw(
-                "SECURE_DNS_SYSTEM_HTTP_PROXY_PROBE",
-                detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue)"
-            )
-            let usable = await self.startSecureDnsSystemProxyIfUsable(
-                settings: settings,
-                endpoints: endpoints
-            )
-            guard usable, !Task.isCancelled else { return }
-
-            let updatedSettings = Self.makeNetworkSettings(
-                endpoints: endpoints,
-                packetEngineCapabilities: packetEngineCapabilities,
-                secureDnsSystemProxyActive: true
-            )
-            do {
-                try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                    self.setTunnelNetworkSettings(updatedSettings) { error in
-                        if let error { cont.resume(throwing: error) }
-                        else { cont.resume() }
-                    }
-                }
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_PROXY_ACTIVATED",
-                    detail: "using_loopback_bridge port=\(SecureDNSConfiguration.systemHTTPProxyPort)"
-                )
-            } catch {
-                self.secureDnsSystemProxy.stopLoopbackHTTPProxy()
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FAILED",
-                    detail: "reason=apply_network_settings_failed error=\(error.localizedDescription)"
-                )
-            }
-        }
-    }
-
-#endif
     private func startStatsSampler() {
         statsTimer?.cancel()
         statsTimer = Task {
@@ -518,6 +393,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     }
 
     private func stopPacketForwarding() {
+        TunnelDnsForwarder.stop()
         connectivityTask?.cancel()
         connectivityTask = nil
         statsTimer?.cancel()
@@ -645,7 +521,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return
         }
 
-        let settings = SharedSettingsStore.shared.appSettings
+        let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
         let proxyOnly = settings.proxyOnlyModeEnabled
         let upstream = LANProxyBridge.Endpoints(
             psiphonHost: endpoints.host,
@@ -962,7 +838,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             mtu: mtu,
             packetEngineCapabilities: packetEngineCapabilities
         )
-        MessagingAppsDiagnostics.runDomainChecks(excludedRoutes: excludedBypassRoutes)
 
         // Full packet mode intentionally leaves proxySettings unset. A system
         // HTTP proxy would make HTTP-only apps appear healthy while masking a
@@ -971,96 +846,6 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             "TUNNEL_HTTP_PROXY",
             detail: "disabled native_packet_mode=true reason=packet_flow_is_authoritative"
         )
-#if false
-        // System HTTP proxy (matchDomains=[""]) makes iOS send ALL HTTP/HTTPS to the Psiphon loopback
-        // proxy. In this architecture that proxy also carries general internet / public-IP checks, so
-        // dropping it broke connectivity even though IP routes were applied.
-        //
-        // Default behavior now: ALWAYS keep the normal system proxy, exactly like bypass=false.
-        // excludedRoutes are applied best-effort — they bypass the VPN for traffic that rides
-        // tun2socks (raw sockets / non-proxy apps), while apps that honor the system HTTP proxy still
-        // go through the tunnel. The UI documents this.
-        //
-        // In DoH mode, proxy-aware apps are sent to a local bridge when it is available. The bridge
-        // resolves CONNECT hostnames through Secure DNS before dialing Psiphon SOCKS. If the bridge
-        // cannot bind and cleartext fallback is allowed, keep Psiphon's HTTP proxy so connecting the
-        // VPN does not cut internet access; strict Secure DNS fails closed instead.
-        // Strict IP bypass mode may also drop the proxy when there is at least one route to honor.
-        let strictMode = SharedSettingsStore.shared.effectiveAppSettings.bypassStrictModeEnabled
-        let disableProxyForBypass = bypassEnabled && strictMode && !excluded.isEmpty
-        let wantsSecureDnsBridge = SecureDNSConfiguration.usesSystemHTTPProxyBridge(for: tunnelSettings)
-        let disableProxyForSecureDNS = SecureDNSConfiguration.isActive(tunnelSettings)
-            && !secureDnsSystemProxyActive
-            && tunnelSettings.blockCleartextDNS
-        if disableProxyForSecureDNS {
-            SharedLogger.shared.logRaw(
-                "SECURE_DNS_SYSTEM_PROXY",
-                detail: "disabled_bridge_unavailable block_cleartext=true mode=\(appSettings.secureDNSMode.rawValue) provider=\(appSettings.secureDNSProvider.rawValue)"
-            )
-            SharedLogger.shared.logRaw(
-                "TUNNEL_HTTP_PROXY",
-                detail: "disabled secure_dns=true block_cleartext=true bypass=\(bypassEnabled) routes=\(excluded.count)"
-            )
-        } else if endpoints.hasHttp && !disableProxyForBypass {
-            let proxy = NEProxySettings()
-            proxy.httpEnabled = true
-            proxy.httpsEnabled = true
-            proxy.excludeSimpleHostnames = false
-            proxy.matchDomains = [""]
-            let proxyPort = SecureDNSConfiguration.systemHTTPProxyPort(
-                for: tunnelSettings,
-                psiphonHttpPort: endpoints.httpPort,
-                bridgeActive: secureDnsSystemProxyActive
-            )
-            let server = NEProxyServer(address: endpoints.host, port: proxyPort)
-            proxy.httpServer = server
-            proxy.httpsServer = server
-            settings.proxySettings = proxy
-            if wantsSecureDnsBridge, secureDnsSystemProxyActive {
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_PROXY",
-                    detail: "using_loopback_bridge port=\(proxyPort)"
-                )
-            } else if wantsSecureDnsBridge {
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_PROXY",
-                    detail: "using_psiphon_http_fallback port=\(proxyPort) block_cleartext=false"
-                )
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_HTTP_PROXY_FALLBACK",
-                    detail: "using_psiphon_http port=\(proxyPort) reason=bridge_unavailable"
-                )
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
-                    detail: "reason=system_http_bridge_unavailable block_cleartext=false"
-                )
-            } else if SecureDNSConfiguration.isActive(tunnelSettings) {
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_SYSTEM_PROXY",
-                    detail: "using_psiphon_http_keep_connectivity port=\(proxyPort) mode=\(tunnelSettings.secureDNSMode.rawValue)"
-                )
-                SharedLogger.shared.logRaw(
-                    "SECURE_DNS_BRIDGE_FALLBACK_TO_PSIPHON_PROXY",
-                    detail: "reason=system_http_proxy_uses_psiphon_http secure_dns_mode=\(tunnelSettings.secureDNSMode.rawValue)"
-                )
-            }
-            SharedLogger.shared.logRaw(
-                "TUNNEL_HTTP_PROXY",
-                detail: "enabled host=\(endpoints.host) port=\(proxyPort) secure_dns_bridge=\(secureDnsSystemProxyActive) bypass=\(bypassEnabled) routes=\(excluded.count)"
-            )
-            if bypassEnabled && excluded.isEmpty {
-                SharedLogger.shared.log(
-                    .bypassIranNoListWarning,
-                    detail: "reason=zero_routes action=keep_system_proxy_normal_vpn"
-                )
-            }
-        } else if disableProxyForBypass {
-            SharedLogger.shared.log(
-                .bypassProxyDisabledForRoutes,
-                detail: "reason=strict_mode_enabled routes=\(excluded.count)"
-            )
-        }
-#endif
 
         return settings
     }

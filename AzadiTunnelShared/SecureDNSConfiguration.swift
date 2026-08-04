@@ -1,11 +1,19 @@
 import Foundation
 
 enum SecureDNSMode: String, Codable, CaseIterable, Identifiable {
-    case off
     case doh
+    /// Decoded only to migrate settings from versions that exposed a cleartext-capable toggle.
+    /// It is never offered or honored as a runtime mode.
+    @available(*, deprecated, message: "Secure DNS is mandatory; migrate to DoH")
+    case off
+    /// Decoded for migration of pre-DoH-only settings. It is never offered or used as a
+    /// transport; ``SharedSettingsStore`` converts it to ``doh`` on the next read.
+    @available(*, deprecated, message: "DoT was replaced by RFC 8484 DoH")
     case dot
 
     var id: String { rawValue }
+
+    static var allCases: [SecureDNSMode] { [.doh] }
 }
 
 enum SecureDNSProvider: String, Codable, CaseIterable, Identifiable {
@@ -18,7 +26,7 @@ enum SecureDNSProvider: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Presets and resolution for optional Secure DNS (DoH / DoT).
+/// Presets and resolution for RFC 8484 DoH inside the established Psiphon tunnel.
 enum SecureDNSConfiguration {
     struct DoHEndpoint {
         let url: URL
@@ -29,30 +37,50 @@ enum SecureDNSConfiguration {
     }
 
     static func isActive(_ settings: AppSettings) -> Bool {
-        settings.secureDNSMode != .off
+        _ = settings
+        return true
     }
 
     static func logStartupStatus(_ settings: AppSettings) {
         switch settings.secureDNSMode {
-        case .off:
-            SharedLogger.shared.log(.secureDnsDisabled)
-        case .doh, .dot:
+        case .doh, .off, .dot:
             SharedLogger.shared.log(
                 .secureDnsEnabled,
-                detail: "mode=\(settings.secureDNSMode.rawValue) provider=\(settings.secureDNSProvider.rawValue) block_cleartext=\(settings.blockCleartextDNS)"
+                detail: "mode=doh provider=\(settings.secureDNSProvider.rawValue) transport=psiphon_socks"
             )
         }
     }
 
-    static func dohURL(for settings: AppSettings) -> URL? {
-        dohEndpoint(for: settings)?.url
+    /// Returns the selected provider followed by independent HTTPS providers. The list is capped
+    /// by ``SecureDNSFailoverPolicy`` at three attempts, but always contains at least two built-in
+    /// endpoints when a custom endpoint is selected.
+    static func dohEndpoints(for settings: AppSettings) -> [DoHEndpoint] {
+        let providers: [SecureDNSProvider] = [
+            settings.secureDNSProvider,
+            .cloudflare,
+            .google,
+            .quad9,
+            .adguard,
+        ]
+        var endpoints: [DoHEndpoint] = []
+        var seen = Set<String>()
+
+        for provider in providers {
+            guard let endpoint = endpoint(for: provider, settings: settings) else { continue }
+            let key = endpoint.url.absoluteString
+            guard seen.insert(key).inserted else { continue }
+            endpoints.append(endpoint)
+        }
+        return endpoints
     }
 
-    static func dohEndpoint(for settings: AppSettings) -> DoHEndpoint? {
-        guard settings.secureDNSMode == .doh else { return nil }
+    private static func endpoint(
+        for provider: SecureDNSProvider,
+        settings: AppSettings
+    ) -> DoHEndpoint? {
         let raw: String
         let bootstrapIPs: [String]
-        switch settings.secureDNSProvider {
+        switch provider {
         case .google:
             raw = "https://dns.google/dns-query"
             bootstrapIPs = ["8.8.8.8", "8.8.4.4"]
@@ -61,7 +89,7 @@ enum SecureDNSConfiguration {
             bootstrapIPs = ["1.1.1.1", "1.0.0.1"]
         case .quad9:
             raw = "https://dns.quad9.net/dns-query"
-            bootstrapIPs = ["9.9.9.9"]
+            bootstrapIPs = ["9.9.9.9", "149.112.112.112"]
         case .adguard:
             raw = "https://dns.adguard-dns.com/dns-query"
             bootstrapIPs = ["94.140.14.14", "94.140.15.15"]
@@ -69,15 +97,31 @@ enum SecureDNSConfiguration {
             raw = settings.customDoHURL.trimmingCharacters(in: .whitespacesAndNewlines)
             bootstrapIPs = []
         }
-        guard !raw.isEmpty else { return nil }
-        guard let url = URL(string: raw),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "https",
+        return makeEndpoint(raw: raw, bootstrapIPs: bootstrapIPs)
+    }
+
+    private static func makeEndpoint(raw: String, bootstrapIPs: [String]) -> DoHEndpoint? {
+        guard !raw.isEmpty,
+              let url = URL(string: raw),
+              url.scheme?.lowercased() == "https",
               let host = url.host,
-              !host.isEmpty else { return nil }
-        let port = url.port.map { UInt16($0) } ?? 443
+              !host.isEmpty,
+              url.user == nil,
+              url.password == nil,
+              url.fragment == nil,
+              !host.contains(where: { $0.isWhitespace || $0 == "\r" || $0 == "\n" }) else {
+            return nil
+        }
+        let portValue = url.port ?? 443
+        guard (1...65_535).contains(portValue), let port = UInt16(exactly: portValue) else {
+            return nil
+        }
         let path = url.path.isEmpty ? "/dns-query" : url.path
+        guard path.hasPrefix("/"), !path.contains("\r"), !path.contains("\n") else { return nil }
         let pathAndQuery = path + (url.query.map { "?\($0)" } ?? "")
+        guard !pathAndQuery.contains(where: { $0.isWhitespace || $0 == "\r" || $0 == "\n" }) else {
+            return nil
+        }
         return DoHEndpoint(
             url: url,
             host: host,
@@ -85,25 +129,6 @@ enum SecureDNSConfiguration {
             pathAndQuery: pathAndQuery,
             bootstrapIPs: bootstrapIPs
         )
-    }
-
-    static func dotEndpoint(for settings: AppSettings) -> (host: String, port: UInt16)? {
-        guard settings.secureDNSMode == .dot else { return nil }
-        let host: String
-        switch settings.secureDNSProvider {
-        case .google:
-            host = "dns.google"
-        case .cloudflare:
-            host = "cloudflare-dns.com"
-        case .quad9:
-            host = "dns.quad9.net"
-        case .adguard:
-            host = "dns.adguard-dns.com"
-        case .custom:
-            host = settings.customDoTHost.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !host.isEmpty else { return nil }
-        return (host, 853)
     }
 
     static func providerDisplayName(_ provider: SecureDNSProvider) -> String {
@@ -118,9 +143,9 @@ enum SecureDNSConfiguration {
 
     static func modeDisplayName(_ mode: SecureDNSMode) -> String {
         switch mode {
-        case .off: return "Off"
+        case .off: return "DoH"
         case .doh: return "DoH"
-        case .dot: return "DoT"
+        case .dot: return "DoH"
         }
     }
 
@@ -141,27 +166,4 @@ enum SecureDNSConfiguration {
         return ["10.0.0.1"]
     }
 
-    /// Fixed loopback port for the Secure DNS system HTTP proxy (CONNECT → Psiphon SOCKS + DoH dial plan).
-    static let systemHTTPProxyPort = 19_087
-
-    /// When true, iOS system HTTP/HTTPS proxy targets our loopback bridge.
-    ///
-    /// The bridge resolves proxy-aware `CONNECT host:443` names through Secure DNS before dialing
-    /// Psiphon. It falls back quickly when cleartext fallback is allowed, so DoH failures do not
-    /// take down normal browsing.
-    static func usesSystemHTTPProxyBridge(for settings: AppSettings) -> Bool {
-        settings.secureDNSMode == .doh
-    }
-
-    /// Port advertised in `NEProxySettings` for the active system HTTP proxy.
-    static func systemHTTPProxyPort(
-        for settings: AppSettings,
-        psiphonHttpPort: Int,
-        bridgeActive: Bool
-    ) -> Int {
-        if usesSystemHTTPProxyBridge(for: settings), bridgeActive {
-            return systemHTTPProxyPort
-        }
-        return psiphonHttpPort
-    }
 }

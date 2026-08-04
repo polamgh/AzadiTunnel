@@ -23,26 +23,10 @@ enum MessagingAppsConfiguration {
     "graph.whatsapp.com",
   ]
 
-  /// WhatsApp endpoints that often return CNAME-only from some DoH providers (e.g. g.whatsapp.net).
-  static let whatsappDiagnosticDomains: [String] = [
-    "g.whatsapp.net",
-    "chat.whatsapp.com",
-    "web.whatsapp.com",
-    "whatsapp.net",
-    "mmg.whatsapp.net",
-    "edge-mqtt.facebook.com",
-    "gateway.facebook.com",
-    "mqtt.c10r.facebook.com",
-    "dgw.c10r.facebook.com",
-    "dit.whatsapp.net",
-    "api.whatsapp.net",
-    "g-fallback.whatsapp.net",
-    "graph.whatsapp.com",
-  ]
-
-  /// Messaging overlays (lower MTU and longer relay timeouts) when Secure DNS is active.
+  /// Messaging overlays are opt-in compatibility behavior only. Secure DNS is deliberately not
+  /// allowed to change tunnel MTU, IPv6 routing, or messaging DNS policy.
   static func usesMessagingOverlays(_ settings: AppSettings) -> Bool {
-    SecureDNSConfiguration.isActive(settings)
+    settings.messagingAppsCompatibilityModeEnabled
   }
 
   static func isWhatsAppDomain(_ host: String) -> Bool {
@@ -60,27 +44,6 @@ enum MessagingAppsConfiguration {
       || normalized.hasSuffix(".fbcdn.net")
       || normalized == "fbsbx.com"
       || normalized.hasSuffix(".fbsbx.com")
-  }
-
-  static func needsMessagingDnsFallback(qname: String, ipv4Answers: [String]) -> Bool {
-    isWhatsAppDomain(qname) && ipv4Answers.isEmpty
-  }
-
-  static func dnsProviderFallbackChain(primary: SecureDNSProvider, qname: String? = nil) -> [SecureDNSProvider] {
-    if let qname, isWhatsAppDomain(qname) || isProtectedDomain(qname) {
-      // Google DoH tends to return usable A records for Meta MQTT/gateway hosts faster than Cloudflare.
-      var chain: [SecureDNSProvider] = [.google]
-      if primary != .google { chain.append(primary) }
-      for candidate in [SecureDNSProvider.cloudflare, .quad9, .adguard] {
-        if !chain.contains(candidate) { chain.append(candidate) }
-      }
-      return chain
-    }
-    var chain: [SecureDNSProvider] = [primary]
-    for candidate in [SecureDNSProvider.google, .quad9, .cloudflare, .adguard] {
-      if !chain.contains(candidate) { chain.append(candidate) }
-    }
-    return chain
   }
 
   enum MessagingApp: String, Equatable {
@@ -121,6 +84,11 @@ enum MessagingAppsConfiguration {
   /// WhatsApp / Telegram TCP ports (chat, HTTPS fallback).
   static let messagingTcpPorts: Set<UInt16> = [
     80, 443, 5222, 5223, 5228, 5242,
+  ]
+
+  /// Common WhatsApp / Telegram UDP ports (voice, media, QUIC). Logged when dropped — not relayed.
+  static let notableUDPPorts: Set<UInt16> = [
+    443, 5222, 5223, 5228, 5242, 3478, 5349, 4000, 4001, 4002, 4003,
   ]
 
   static func isTelegramIPv4(_ ip: String) -> Bool {
@@ -223,16 +191,9 @@ enum MessagingAppsConfiguration {
     protectedIPv4Prefixes.contains { ip.hasPrefix($0) }
   }
 
-  /// Overlay applied inside the tunnel when compatibility mode is on (or Secure DNS needs messaging-friendly MTU/DNS).
+  /// Overlay applied inside the tunnel only when the explicit compatibility toggle is on.
   static func tunnelSettings(from base: AppSettings) -> AppSettings {
-    guard usesMessagingOverlays(base) else { return base }
-    var overlay = base
-    if overlay.secureDNSMode == .off {
-      overlay.secureDNSMode = .doh
-      overlay.secureDNSProvider = .cloudflare
-      overlay.blockCleartextDNS = false
-    }
-    return overlay
+    base
   }
 
   static func tunnelMTU(for settings: AppSettings) -> Int {

@@ -73,15 +73,17 @@ struct AppSettings: Codable, Equatable {
     /// break general internet / public-IP checks in this architecture (system proxy carries them).
     var bypassStrictModeEnabled: Bool = false
 
-    /// Optional encrypted DNS for full-tunnel mode. Off by default — no behavior change until enabled.
-    var secureDNSMode: SecureDNSMode = .off
+    /// RFC 8484 DoH for all intercepted tunnel DNS. DoH is mandatory; legacy `.off`/`.dot`
+    /// values are decoded only long enough to migrate old App Group settings.
+    var secureDNSMode: SecureDNSMode = .doh
     var secureDNSProvider: SecureDNSProvider = .cloudflare
     var customDoHURL: String = ""
+    /// Legacy DoT host retained only so old settings can decode before migration to DoH.
     var customDoTHost: String = ""
-    /// When Secure DNS is on and a query fails, block fallback to legacy DNS (SERVFAIL instead).
-    var blockCleartextDNS: Bool = false
+    /// Legacy compatibility field. DoH is always fail-closed; no cleartext fallback exists.
+    var blockCleartextDNS: Bool = true
 
-    /// Legacy toggle; overlays now apply automatically when Secure DNS is on. Kept for settings migration only.
+    /// Explicit compatibility toggle. Secure DNS never changes this user's choice.
     var messagingAppsCompatibilityModeEnabled: Bool = false
     /// Applied when ``messagingAppsCompatibilityModeEnabled`` is on (default 1280).
     var messagingAppsTunnelMTU: MessagingTunnelMTU = .compat1280

@@ -16,16 +16,28 @@ enum SecureDNSResolver {
     private actor ResolutionState {
         private let cache = SecureDNSCache()
         private let coalescer = SecureDNSResolutionCoordinator<ResolutionValue>()
+        private let limiter = SecureDNSConcurrencyLimiter()
+
+        init() {
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_ADMISSION_CONFIG",
+                detail: "max_in_flight=\(SecureDNSConcurrencyLimiter.defaultMaxConcurrentOperations) "
+                    + "max_queued=\(SecureDNSConcurrencyLimiter.defaultMaxQueuedOperations)"
+            )
+        }
 
         func value(
             for key: Data,
-            operation: @escaping @Sendable () async throws -> ResolutionValue
+            operation: @escaping @Sendable (SecureDNSDeadline) async throws -> ResolutionValue
         ) async throws -> ResolutionValue {
             if let cached = await cache.value(for: key) {
                 return ResolutionValue(response: cached, lifetime: nil)
             }
             let handle = await coalescer.acquire(for: key) {
-                let result = try await operation()
+                let deadline = SecureDNSDeadline(after: SecureDNSFailoverPolicy.totalTimeout)
+                let result = try await limiter.withPermit(deadline: deadline) {
+                    try await operation(deadline)
+                }
                 if let lifetime = result.lifetime {
                     await self.cache.insert(
                         response: result.response,
@@ -44,6 +56,7 @@ enum SecureDNSResolver {
 
         func cancelAll() async {
             await coalescer.cancelAll()
+            await limiter.cancelQueued()
             await cache.removeAll()
         }
     }
@@ -85,15 +98,15 @@ enum SecureDNSResolver {
         guard !endpoints.isEmpty else { throw SecureDNSTransportError.noResolver }
         let queryID = queryMessage.id
 
-        let value = try await state.value(for: key) {
+        let value = try await state.value(for: key) { overallDeadline in
             try Task.checkCancellation()
             do {
                 let response = try await SecureDNSDoHClient.post(
                     endpoints: endpoints,
-                    provider: settings.secureDNSProvider,
                     wireQuery: wireQuery,
                     socksHost: socksHost,
-                    socksPort: socksPort
+                    socksPort: socksPort,
+                    overallDeadline: overallDeadline
                 )
                 let validated = try SecureDNSWire.validateResponse(
                     response,

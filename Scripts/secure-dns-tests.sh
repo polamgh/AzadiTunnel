@@ -9,6 +9,7 @@ swiftc -O -parse-as-library \
   "$repo_dir/AzadiTunnelShared/SecureDNSWire.swift" \
   "$repo_dir/AzadiTunnelShared/SecureDNSCache.swift" \
   "$repo_dir/AzadiTunnelShared/SecureDNSClock.swift" \
+  "$repo_dir/AzadiTunnelShared/SecureDNSConcurrencyLimiter.swift" \
   "$repo_dir/AzadiTunnelShared/SecureDNSResolutionCoordinator.swift" \
   "$repo_dir/AzadiTunnelShared/SecureDNSBootstrap.swift" \
   "$repo_dir/AzadiTunnelShared/SecureDNSFailoverPolicy.swift" \
@@ -37,6 +38,16 @@ if rg -n 'logRaw\([^\n]*(qname|queryId)|log\([^\n]*(qname|queryId)' \
   echo "secure DNS query metadata logging check failed" >&2
   exit 1
 fi
+
+if rg -n 'SECURE_DNS_DOH_ATTEMPT(_FAILED)?' \
+  "$repo_dir/AzadiTunnelPacketTunnel/SecureDNSDoHClient.swift" \
+  "$repo_dir/AzadiTunnelPacketTunnel/SecureDNSResolver.swift"; then
+  echo "secure DNS contains per-attempt persistent logging" >&2
+  exit 1
+fi
+
+rg -q 'SECURE_DNS_ADMISSION_CONFIG' \
+  "$repo_dir/AzadiTunnelPacketTunnel/SecureDNSResolver.swift"
 
 rg -q 'Content-Type: application/dns-message' "$repo_dir/AzadiTunnelPacketTunnel/SecureDNSDoHClient.swift"
 if rg -n 'Content-Type: application/json|Accept: application/json' \

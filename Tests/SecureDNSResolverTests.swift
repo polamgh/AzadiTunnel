@@ -12,6 +12,8 @@ struct SecureDNSResolverTests {
         await testCacheExpiryAndBounds()
         await testFailoverBehavior()
         await testCoalescingAndCancellation()
+        await testConcurrencyLimiterStress()
+        await testConcurrencyLimiterCancellationAndTimeout()
         print("SecureDNSResolverTests: PASS")
     }
 
@@ -223,6 +225,206 @@ struct SecureDNSResolverTests {
         let inFlightCount = await coordinator.count
         precondition(inFlightCount == 0)
     }
+
+    private static func testConcurrencyLimiterStress() async {
+        precondition(SecureDNSConcurrencyLimiter.defaultMaxConcurrentOperations == 4)
+        precondition(SecureDNSConcurrencyLimiter.defaultMaxQueuedOperations == 64)
+        let limiter = SecureDNSConcurrencyLimiter()
+        let gate = AsyncGate()
+        let tracker = ConcurrencyTracker()
+        let tasks = (0..<24).map { _ in
+            Task<Void, Error> {
+                try await limiter.withPermit(deadline: SecureDNSDeadline(after: 2)) {
+                    await tracker.enter()
+                    await gate.wait()
+                    await tracker.leave()
+                }
+            }
+        }
+
+        await waitUntil("limiter did not fill its bounded active set") {
+            let active = await limiter.activeCount
+            let queued = await limiter.queuedCount
+            return active == 4 && queued == 20
+        }
+        let peak = await tracker.peak
+        precondition(peak == 4, "limiter allowed \(peak) concurrent operations")
+
+        await gate.open()
+        for task in tasks {
+            await tryOrFailAsync { try await task.value }
+        }
+        let finalActiveCount = await limiter.activeCount
+        let finalQueuedCount = await limiter.queuedCount
+        precondition(finalActiveCount == 0)
+        precondition(finalQueuedCount == 0)
+    }
+
+    private static func testConcurrencyLimiterCancellationAndTimeout() async {
+        let limiter = SecureDNSConcurrencyLimiter(
+            maxConcurrentOperations: 1,
+            maxQueuedOperations: 2
+        )
+        let holderGate = AsyncGate()
+        let started = StartRecorder()
+        let holder = Task<Int, Error> {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 2)) {
+                await holderGate.wait()
+                return 1
+            }
+        }
+        await waitUntil("holder did not acquire limiter") {
+            let active = await limiter.activeCount
+            return active == 1
+        }
+
+        let cancelled = Task<Int, Error> {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 2)) {
+                await started.record()
+                return 2
+            }
+        }
+        await waitUntil("cancellable operation was not queued") {
+            let queued = await limiter.queuedCount
+            return queued == 1
+        }
+        let cancelStarted = SecureDNSMonotonicClock.now
+        cancelled.cancel()
+        do {
+            _ = try await cancelled.value
+            preconditionFailure("queued cancellation unexpectedly ran")
+        } catch {
+            precondition(error is CancellationError)
+        }
+        precondition(
+            SecureDNSMonotonicClock.now - cancelStarted < 0.25,
+            "queued cancellation was not immediate"
+        )
+        let queuedAfterCancellation = await limiter.queuedCount
+        let startsAfterCancellation = await started.count
+        precondition(queuedAfterCancellation == 0, "cancelled waiter retained queue capacity")
+        precondition(startsAfterCancellation == 0, "cancelled queued operation started")
+
+        let timeoutStarted = SecureDNSMonotonicClock.now
+        let timedOut = Task<Int, Error> {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 0.05)) {
+                await started.record()
+                return 3
+            }
+        }
+        do {
+            _ = try await timedOut.value
+            preconditionFailure("queued deadline unexpectedly ran")
+        } catch let error as SecureDNSConcurrencyLimiter.AdmissionError {
+            precondition(error == .deadlineExceeded)
+        } catch {
+            preconditionFailure("unexpected queued timeout error: \(error)")
+        }
+        precondition(
+            SecureDNSMonotonicClock.now - timeoutStarted < 0.3,
+            "queued deadline exceeded its bound"
+        )
+        let queuedAfterTimeout = await limiter.queuedCount
+        let startsAfterTimeout = await started.count
+        precondition(queuedAfterTimeout == 0, "timed-out waiter retained queue capacity")
+        precondition(startsAfterTimeout == 0, "timed-out queued operation started")
+
+        let queuedA = Task<Int, Error> {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 2)) { 4 }
+        }
+        let queuedB = Task<Int, Error> {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 2)) { 5 }
+        }
+        await waitUntil("bounded queue did not fill") {
+            let queued = await limiter.queuedCount
+            return queued == 2
+        }
+        do {
+            _ = try await limiter.withPermit(deadline: SecureDNSDeadline(after: 1)) { 6 }
+            preconditionFailure("queue accepted work beyond its bound")
+        } catch let error as SecureDNSConcurrencyLimiter.AdmissionError {
+            precondition(error == .queueFull)
+        } catch {
+            preconditionFailure("unexpected queue-full error: \(error)")
+        }
+        await limiter.cancelQueued()
+        do { _ = try await queuedA.value; preconditionFailure("queued A was not drained") }
+        catch { precondition(error is CancellationError) }
+        do { _ = try await queuedB.value; preconditionFailure("queued B was not drained") }
+        catch { precondition(error is CancellationError) }
+
+        await holderGate.open()
+        let holderValue = await tryOrFailAsync { try await holder.value }
+        precondition(holderValue == 1)
+        let reused = await tryOrFailAsync {
+            try await limiter.withPermit(deadline: SecureDNSDeadline(after: 0.2)) { 7 }
+        }
+        precondition(reused == 7, "released capacity could not be reused")
+        let activeAfterReuse = await limiter.activeCount
+        let queuedAfterReuse = await limiter.queuedCount
+        precondition(activeAfterReuse == 0)
+        precondition(queuedAfterReuse == 0)
+
+        let activeLimiter = SecureDNSConcurrencyLimiter(
+            maxConcurrentOperations: 1,
+            maxQueuedOperations: 1
+        )
+        let active = Task<Int, Error> {
+            try await activeLimiter.withPermit(deadline: SecureDNSDeadline(after: 2)) {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                return 8
+            }
+        }
+        await waitUntil("active cancellation test did not acquire permit") {
+            let active = await activeLimiter.activeCount
+            return active == 1
+        }
+        active.cancel()
+        do { _ = try await active.value; preconditionFailure("active operation was not cancelled") }
+        catch { precondition(error is CancellationError) }
+        await waitUntil("active cancellation leaked its permit") {
+            let active = await activeLimiter.activeCount
+            return active == 0
+        }
+        let afterActiveCancel = await tryOrFailAsync {
+            try await activeLimiter.withPermit(deadline: SecureDNSDeadline(after: 0.2)) { 9 }
+        }
+        precondition(afterActiveCancel == 9)
+
+        do {
+            let _: Int = try await activeLimiter.withPermit(
+                deadline: SecureDNSDeadline(after: 0.2)
+            ) {
+                try await Task.sleep(nanoseconds: 10_000_000)
+                throw SecureDNSFailoverPolicy.Error.attemptTimedOut
+            }
+            preconditionFailure("active timeout unexpectedly succeeded")
+        } catch let error as SecureDNSFailoverPolicy.Error {
+            precondition(error == .attemptTimedOut)
+        } catch {
+            preconditionFailure("unexpected active timeout error: \(error)")
+        }
+        let activeAfterTimeout = await activeLimiter.activeCount
+        precondition(activeAfterTimeout == 0, "active timeout leaked its permit")
+        let afterActiveTimeout = await tryOrFailAsync {
+            try await activeLimiter.withPermit(deadline: SecureDNSDeadline(after: 0.2)) { 10 }
+        }
+        precondition(afterActiveTimeout == 10)
+    }
+
+    private static func waitUntil(
+        _ failure: String,
+        timeout: TimeInterval = 1,
+        condition: @escaping () async -> Bool
+    ) async {
+        let deadline = SecureDNSDeadline(after: timeout)
+        while deadline.remaining > 0 {
+            if await condition() { return }
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        preconditionFailure(failure)
+    }
+
     private static func makeQuery(id: UInt16, type: UInt16) -> Data {
         let data = Data([
             UInt8(id >> 8), UInt8(id & 0xff), 0x01, 0x00,
@@ -353,6 +555,48 @@ struct SecureDNSResolverTests {
 
         func values() -> [String] {
             recorded
+        }
+    }
+
+    private actor AsyncGate {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            guard !isOpen else { return }
+            await withCheckedContinuation { continuation in
+                waiters.append(continuation)
+            }
+        }
+
+        func open() {
+            guard !isOpen else { return }
+            isOpen = true
+            let queued = waiters
+            waiters.removeAll(keepingCapacity: true)
+            for waiter in queued { waiter.resume() }
+        }
+    }
+
+    private actor ConcurrencyTracker {
+        private var active = 0
+        private(set) var peak = 0
+
+        func enter() {
+            active += 1
+            peak = max(peak, active)
+        }
+
+        func leave() {
+            active -= 1
+        }
+    }
+
+    private actor StartRecorder {
+        private(set) var count = 0
+
+        func record() {
+            count += 1
         }
     }
 }

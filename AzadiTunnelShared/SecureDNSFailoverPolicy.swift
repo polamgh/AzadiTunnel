@@ -24,6 +24,7 @@ enum SecureDNSFailoverPolicy {
         endpoints: [Endpoint],
         perAttemptTimeout: TimeInterval = Self.perAttemptTimeout,
         totalTimeout: TimeInterval = Self.totalTimeout,
+        overallDeadline: SecureDNSDeadline? = nil,
         operation: @escaping @Sendable (_ endpoint: Endpoint, _ index: Int, _ deadline: SecureDNSDeadline) async throws -> Value
     ) async throws -> Value {
         let candidates = Array(endpoints.prefix(maxAttempts))
@@ -31,12 +32,14 @@ enum SecureDNSFailoverPolicy {
 
         let perAttempt = max(0.01, min(perAttemptTimeout, 3.0))
         let total = max(0.01, min(totalTimeout, perAttempt * TimeInterval(candidates.count)))
-        let overallDeadline = SecureDNSDeadline(after: total)
+        let remainingTotal = min(total, overallDeadline?.remaining ?? total)
+        guard remainingTotal > 0.01 else { throw Error.totalTimeout }
+        let effectiveDeadline = SecureDNSDeadline(after: remainingTotal)
         var lastError: Swift.Error?
 
         for (index, endpoint) in candidates.enumerated() {
             try Task.checkCancellation()
-            let remaining = overallDeadline.remaining
+            let remaining = effectiveDeadline.remaining
             guard remaining > 0.01 else { break }
             let deadline = SecureDNSDeadline(after: min(perAttempt, remaining))
             do {

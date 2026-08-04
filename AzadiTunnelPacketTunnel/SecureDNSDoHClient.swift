@@ -5,10 +5,10 @@ import Foundation
 enum SecureDNSDoHClient {
     static func post(
         endpoints: [SecureDNSConfiguration.DoHEndpoint],
-        provider: SecureDNSProvider,
         wireQuery: Data,
         socksHost: String,
-        socksPort: Int
+        socksPort: Int,
+        overallDeadline: SecureDNSDeadline
     ) async throws -> Data {
         guard socksPort > 0 else { throw SecureDNSTransportError.noProxy }
         guard !wireQuery.isEmpty, wireQuery.count <= 65_535 else {
@@ -20,30 +20,15 @@ enum SecureDNSDoHClient {
         do {
             return try await SecureDNSFailoverPolicy.perform(
                 endpoints: Array(candidates),
-                operation: { endpoint, index, deadline in
-                    SharedLogger.shared.logRaw(
-                        "SECURE_DNS_DOH_ATTEMPT",
-                        detail: "provider=\(provider.rawValue) endpoint_index=\(index)"
+                overallDeadline: overallDeadline,
+                operation: { endpoint, _, deadline in
+                    try await post(
+                        endpoint: endpoint,
+                        wireQuery: wireQuery,
+                        socksHost: socksHost,
+                        socksPort: socksPort,
+                        deadline: deadline
                     )
-                    do {
-                        return try await post(
-                            endpoint: endpoint,
-                            wireQuery: wireQuery,
-                            socksHost: socksHost,
-                            socksPort: socksPort,
-                            deadline: deadline
-                        )
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    } catch {
-                        // Do not persist or log provider/network text that could contain a query,
-                        // URL credentials, or other user-controlled data.
-                        SharedLogger.shared.logRaw(
-                            "SECURE_DNS_DOH_ATTEMPT_FAILED",
-                            detail: "provider=\(provider.rawValue) endpoint_index=\(index) reason=transport"
-                        )
-                        throw error
-                    }
                 }
             )
         } catch SecureDNSFailoverPolicy.Error.noEndpoints {

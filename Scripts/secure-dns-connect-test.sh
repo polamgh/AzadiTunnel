@@ -89,13 +89,13 @@ def require(label, ok):
 interesting = [
     "UITEST_SETTINGS",
     "SECURE_DNS_ENABLED",
+    "SECURE_DNS_ADMISSION_CONFIG",
     "TUNNEL_DNS_ADVERTISED",
     "TUNNEL_HTTP_PROXY",
     "SECURE_DNS_BYPASS_DETECTED",
     "SECURE_DNS_TEST_STARTED",
     "SECURE_DNS_TEST_OK",
     "SECURE_DNS_TEST_FAILED",
-    "SECURE_DNS_DOH_ATTEMPT",
     "PROXY_ONLY_NO_DEFAULT_ROUTE",
     "PROXY_ONLY_NO_SYSTEM_PROXY",
     "FEATURE_OK secure_dns_test",
@@ -120,10 +120,13 @@ failures = []
 
 if expect == "doh":
     require("SECURE_DNS_ENABLED", bool(any_sub("SECURE_DNS_ENABLED")))
+    require(
+        "SECURE_DNS_ADMISSION_CONFIG max_in_flight=4 max_queued=64",
+        bool(any_all("SECURE_DNS_ADMISSION_CONFIG", "max_in_flight=4", "max_queued=64")),
+    )
     require("TUNNEL_DNS_ADVERTISED", bool(any_sub("TUNNEL_DNS_ADVERTISED")))
     require("SECURE_DNS_TEST_STARTED", bool(any_sub("SECURE_DNS_TEST_STARTED")))
     require("SECURE_DNS_TEST_OK", bool(any_sub("SECURE_DNS_TEST_OK")))
-    require("SECURE_DNS_DOH_ATTEMPT", bool(any_sub("SECURE_DNS_DOH_ATTEMPT")))
     require("FEATURE_OK secure_dns_test", bool(any_all("FEATURE_OK", "secure_dns_test")))
     require("FEATURE_OK internet_probe", bool(any_all("FEATURE_OK", "internet_probe")))
     require("FEATURE_OK main_app_ip_https", bool(any_all("FEATURE_OK", "main_app_ip_https")))

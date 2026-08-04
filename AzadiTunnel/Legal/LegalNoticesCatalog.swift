@@ -36,14 +36,6 @@ enum LegalNoticesCatalog {
             licenseNeedsVerification: true
         ),
         OpenSourceComponent(
-            id: "tun2socks",
-            name: "tun2socks (Swift Package)",
-            license: "License: needs verification",
-            sourceURL: "https://github.com/zhuhaow/tun2socks",
-            description: "Forwards packet tunnel traffic to the local Psiphon SOCKS proxy.",
-            licenseNeedsVerification: true // TODO: Confirm upstream license and bundle notice if required.
-        ),
-        OpenSourceComponent(
             id: "geolite2-country",
             name: "GeoLite2 Country database (MMDB)",
             license: "MaxMind GeoLite2 License (needs verification)",

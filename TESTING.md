@@ -28,6 +28,27 @@ xcodebuild build \
   -destination 'generic/platform=iOS'
 ```
 
+## Native packet tunnel callback
+
+The packet-flow bridge has a dependency-free focused harness for ordered
+delivery, bounded capacity, close behavior, and IPv4/IPv6 TCP/UDP protocol
+classification:
+
+```bash
+bash Tooling/tests/packet-tunnel-bridge-tests.sh
+```
+
+Rebuild the pinned Psiphon core and its generated callback API before an
+extension build:
+
+```bash
+bash Tooling/psiphon/build-ios-xcframework.sh
+xcodebuild build \
+  -project AzadiTunnel.xcodeproj \
+  -scheme AzadiTunnelPacketTunnel \
+  -destination 'generic/platform=iOS'
+```
+
 ## Protocol parity (Shiro Khorshid)
 
 Static check (protocol names vs Android APK):

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Structured logging for tun2socks → SOCKS5 → Psiphon relay paths (messaging apps).
+/// Structured logging for extension-local SOCKS5 → Psiphon TCP diagnostics.
 enum TcpRelayDiagnostics {
     struct SessionContext: Sendable {
         let sessionId: UInt64

@@ -23,9 +23,9 @@ enum MessagingAppsDiagnostics {
         "secure_dns=\(effective.secureDNSMode.rawValue)",
         "bypass_iran=\(settings.bypassIranIPsEnabled)",
         "excluded_routes=\(excludedRoutes.count)",
-        "udp_relay=tcp_only",
-        "ipv6_relay=none",
-        "ipv6_policy=\(overlays ? "blackhole" : "none")",
+        "udp_relay=native_packet",
+        "ipv6_relay=native_packet",
+        "ipv6_policy=native_packet",
       ].joined(separator: " ")
     )
     if overlays {
@@ -138,23 +138,6 @@ enum MessagingAppsDiagnostics {
     SharedLogger.shared.logRaw(
       event,
       detail: "app=\(app) stage=\(stage) dest=\(host):\(port)\(error.map { " reason=\($0)" } ?? "")"
-    )
-  }
-
-  static func logUdpDropped(destIP: String, destPort: UInt16, length: Int) {
-    let messagingIP = MessagingAppsConfiguration.isProtectedIPv4(destIP)
-    let notablePort = MessagingAppsConfiguration.notableUDPPorts.contains(destPort)
-    guard messagingIP || notablePort else { return }
-    SharedLogger.shared.logRaw(
-      "MESSAGING_UDP_DROPPED",
-      detail: "dest=\(destIP):\(destPort) len=\(length) reason=tun2socks_tcp_only messaging_ip=\(messagingIP)"
-    )
-  }
-
-  static func logIpv6Dropped(length: Int) {
-    SharedLogger.shared.logRaw(
-      "MESSAGING_IPV6_DROPPED",
-      detail: "len=\(length) reason=ipv6_not_relayed"
     )
   }
 

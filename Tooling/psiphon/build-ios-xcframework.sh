@@ -8,6 +8,7 @@ VENDOR_DIR="${REPO_ROOT}/Vendor"
 PIN_FILE="${SCRIPT_DIR}/PSIPHON_PINNED_COMMIT"
 BUILD_ROOT="${SCRIPT_DIR}/build"
 SRC_DIR="${BUILD_ROOT}/psiphon-tunnel-core"
+PACKET_TUNNEL_PATCH="${SCRIPT_DIR}/patches/packet-tunnel-callback.patch"
 
 PINNED="$(tr -d '[:space:]' < "${PIN_FILE}")"
 REPO_URL="https://github.com/shirokhorshid/psiphon-tunnel-core.git"
@@ -21,6 +22,13 @@ fi
 
 git -C "${SRC_DIR}" fetch --depth 1 origin "${PINNED}" 2>/dev/null || git -C "${SRC_DIR}" fetch origin
 git -C "${SRC_DIR}" checkout -f "${PINNED}"
+
+if ! git -C "${SRC_DIR}" apply --check "${PACKET_TUNNEL_PATCH}"; then
+  echo "Pinned Psiphon source does not match packet tunnel callback patch"
+  exit 1
+fi
+git -C "${SRC_DIR}" apply "${PACKET_TUNNEL_PATCH}"
+echo "Applied public packet tunnel callback adaptation"
 
 # Xcode 26+ SDK: netinet6/in6.h is no longer a public module header.
 grep -rl 'netinet6/in6.h' "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel" 2>/dev/null | while read -r f; do

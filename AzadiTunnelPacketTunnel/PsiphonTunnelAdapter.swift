@@ -1,6 +1,26 @@
 import Foundation
 import PsiphonTunnel
 
+private final class PsiphonPacketTunnelProviderAdapter: NSObject, PsiphonPacketTunnelProvider {
+    private let io: PsiphonPacketTunnelIO
+
+    init(io: PsiphonPacketTunnelIO) {
+        self.io = io
+    }
+
+    func readPacket() throws -> Data {
+        try io.readPacket()
+    }
+
+    func writePacket(_ packet: Data) throws {
+        try io.writePacket(packet)
+    }
+
+    func closePacketTunnel() {
+        io.close()
+    }
+}
+
 /// Bridges PsiphonTunnel Objective-C API — **packet tunnel target only** (links PsiphonTunnel.framework).
 final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecked Sendable {
     private let lock = NSLock()
@@ -11,6 +31,8 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     private var socksPort: Int = 0
     private var httpPort: Int = 0
     private var connected = false
+    private var packetMode = false
+    private var packetProviderAdapter: PsiphonPacketTunnelProviderAdapter?
     private var startContinuation: CheckedContinuation<Void, Error>?
     private var startTimeoutTask: Task<Void, Never>?
     private var proxySelectionTask: Task<Void, Never>?
@@ -30,7 +52,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     var isRunning: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return connected && socksPort > 0
+        return connected && (packetMode ? packetProviderAdapter != nil : socksPort > 0)
     }
 
     var localProxyHost: String { "127.0.0.1" }
@@ -62,14 +84,20 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         return _lastError
     }
 
-    func start(configJSON: String, serverEntriesPath: String?, dataDir: URL) async throws {
+    func start(
+        configJSON: String,
+        serverEntriesPath: String?,
+        dataDir: URL,
+        packetTunnel: PsiphonPacketTunnelIO?
+    ) async throws {
         Self.diagLogCount = 0
         let hasEntries = !(serverEntriesPath ?? "").isEmpty
             && FileManager.default.fileExists(atPath: serverEntriesPath ?? "")
         let configWithStore = try Self.configJSON(
             configJSON,
             dataStoreDirectory: dataDir,
-            hasEmbeddedServerEntries: hasEntries
+            hasEmbeddedServerEntries: hasEntries,
+            packetMode: packetTunnel != nil
         )
         try PsiphonConfigValidator.validate(configWithStore, hasEmbeddedServerEntries: hasEntries)
         SharedLogger.shared.log(.psiphonConfigValid)
@@ -83,8 +111,14 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         }
         try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
 
+        lock.lock()
         socksPort = 0
         httpPort = 0
+        connected = false
+        packetMode = packetTunnel != nil
+        packetProviderAdapter = packetTunnel.map { PsiphonPacketTunnelProviderAdapter(io: $0) }
+        _lastError = nil
+        lock.unlock()
         proxySelectionTask?.cancel()
         connectionPollTask?.cancel()
         conduitFallbackTask?.cancel()
@@ -93,9 +127,13 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let newTunnel = PsiphonTunnel.newPsiphonTunnel(self)
+            if let packetProviderAdapter {
+                newTunnel.setPacketTunnelProvider(packetProviderAdapter)
+            }
             lock.lock()
             startContinuation = continuation
-            tunnel = PsiphonTunnel.newPsiphonTunnel(self)
+            tunnel = newTunnel
             lock.unlock()
 
             startTimeoutTask = Task { [weak self] in
@@ -103,7 +141,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
                 self?.failStartIfStillWaiting(reason: "psiphon_connect_timeout")
             }
 
-            let ok = tunnel?.start(false) ?? false
+            let ok = newTunnel.start(false)
             if !ok {
                 failStartIfStillWaiting(reason: "PsiphonTunnel.start returned false")
             } else {
@@ -119,11 +157,25 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         conduitFallbackTask?.cancel()
         startTimeoutTask?.cancel()
         SharedLogger.shared.log(.psiphonStopRequested)
+
         lock.lock()
-        tunnel?.stop()
+        let currentTunnel = tunnel
+        let waitingContinuation = startContinuation
+        startContinuation = nil
+        lock.unlock()
+
+        if let waitingContinuation {
+            waitingContinuation.resume(throwing: PsiphonTunnelCoreError.startFailed("psiphon_stopped"))
+        }
+        currentTunnel?.stop()
+        currentTunnel?.setPacketTunnelProvider(nil)
+
+        lock.lock()
         connected = false
         socksPort = 0
         httpPort = 0
+        packetMode = false
+        packetProviderAdapter = nil
         tunnel = nil
         lock.unlock()
         SharedSettingsStore.shared.psiphonTunnelEstablished = false
@@ -133,7 +185,8 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     private static func configJSON(
         _ jsonText: String,
         dataStoreDirectory: URL,
-        hasEmbeddedServerEntries: Bool
+        hasEmbeddedServerEntries: Bool,
+        packetMode: Bool = false
     ) throws -> String {
         let normalized = try PsiphonConfigValidator.normalizedJSON(
             jsonText,
@@ -148,6 +201,13 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         dict["MigrateRemoteServerListDownloadFilename"] = remoteListFile
         dict["EmitDiagnosticNotices"] = true
         dict["EmitBytesTransferred"] = true
+        if packetMode {
+            // These addresses are consumed by Psiphon's native packet tunnel
+            // transport for transparent DNS rewriting. The Swift flow bridge
+            // remains responsible for Secure DNS interception when enabled.
+            dict["PacketTunnelTransparentDNSIPv4Address"] = "10.0.0.1"
+            dict["PacketTunnelTransparentDNSIPv6Address"] = "fd00::1"
+        }
         let out = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         guard let text = String(data: out, encoding: .utf8) else {
             throw PsiphonConfigValidationError.invalidJSON
@@ -196,10 +256,12 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         )
     }
 
-    /// Resume `start()` only when SOCKS is listening **and** tunnel-core reports connected.
+    /// Resume `start()` when native packet mode has a callback provider, or
+    /// proxy mode has a SOCKS listener, and tunnel-core reports connected.
     private func tryFinishStartIfReady() {
         lock.lock()
-        guard let continuation = startContinuation, socksPort > 0 else {
+        let ready = packetMode ? packetProviderAdapter != nil : socksPort > 0
+        guard let continuation = startContinuation, ready else {
             lock.unlock()
             return
         }
@@ -210,13 +272,16 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
         }
         startContinuation = nil
         connected = true
+        let socks = socksPort
+        let http = httpPort
+        let nativePacketMode = packetMode
         lock.unlock()
 
         startTimeoutTask?.cancel()
         SharedLogger.shared.log(.psiphonStarted)
         SharedLogger.shared.log(
             .psiphonLocalProxy,
-            detail: "socks=\(socksPort) http=\(httpPort)"
+            detail: "socks=\(socks) http=\(http) packet_mode=\(nativePacketMode)"
         )
         continuation.resume()
     }
@@ -331,10 +396,14 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
                       let dataDir = self.psiphonDataDirectory else { return }
                 let hasEntries = !self.serverEntriesPath.isEmpty
                     && FileManager.default.fileExists(atPath: self.serverEntriesPath)
+                self.lock.lock()
+                let nativePacketMode = self.packetMode
+                self.lock.unlock()
                 let merged = try Self.configJSON(
                     base,
                     dataStoreDirectory: dataDir,
-                    hasEmbeddedServerEntries: hasEntries
+                    hasEmbeddedServerEntries: hasEntries,
+                    packetMode: nativePacketMode
                 )
                 self.lock.lock()
                 self.configJSON = merged

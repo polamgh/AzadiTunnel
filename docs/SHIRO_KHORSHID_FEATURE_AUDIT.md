@@ -143,7 +143,7 @@ Inspected: `AndroidManifest.xml`, all `res/xml/*_preferences.xml`, `app/src/main
 
 | Feature | Android location | What it does | iOS equivalent | Priority | NE feasible |
 |---------|------------------|--------------|----------------|----------|-------------|
-| **User DNS settings UI** | *None* in preferences | DNS inside `VpnManager` / tun2socks / Psiphon stack | Optional `NEDNSSettings` in `PacketTunnelProvider.makeNetworkSettings` | **P2** | **Partial** — no Android UI to mirror |
+| **User DNS settings UI** | *None* in preferences | DNS inside `VpnManager` / Psiphon packet stack | `NEDNSSettings` plus native transparent DNS addresses in `PacketTunnelProvider.makeNetworkSettings` | **P2** | **Partial** — no Android UI to mirror |
 
 ---
 

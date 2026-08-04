@@ -89,7 +89,7 @@ interesting = [
     "SECURE_DNS_ENABLED",
     "SECURE_DNS_DISABLED",
     "TUNNEL_DNS_ADVERTISED",
-    "SECURE_DNS_SYSTEM_PROXY",
+    "PSIPHON_NATIVE_PACKET_TUNNEL_READY",
     "TUNNEL_HTTP_PROXY",
     "DNS_QUERY_RECEIVED",
     "SECURE_DNS_SELECTED",
@@ -126,8 +126,9 @@ if expect == "off":
 elif expect == "doh":
     require("SECURE_DNS_ENABLED", bool(any_sub("SECURE_DNS_ENABLED")))
     require("TUNNEL_DNS_ADVERTISED", bool(any_sub("TUNNEL_DNS_ADVERTISED")))
-    require("SECURE_DNS_SYSTEM_PROXY using_loopback_bridge", bool(any_all("SECURE_DNS_SYSTEM_PROXY", "using_loopback_bridge")))
-    require("TUNNEL_HTTP_PROXY secure_dns_bridge=true", bool(any_all("TUNNEL_HTTP_PROXY", "secure_dns_bridge=true")))
+    require("PSIPHON_NATIVE_PACKET_TUNNEL_READY ipv4/ipv6 tcp/udp", bool(any_all("PSIPHON_NATIVE_PACKET_TUNNEL_READY", "ip_versions=ipv4,ipv6", "transports=tcp,udp")))
+    require("TUNNEL_HTTP_PROXY disabled native packet path", bool(any_all("TUNNEL_HTTP_PROXY", "disabled native_packet=true")))
+    require("no system HTTP proxy activation", not any_all("TUNNEL_HTTP_PROXY", "enabled"))
     require("DNS_QUERY_RECEIVED", bool(any_sub("DNS_QUERY_RECEIVED")))
     require("SECURE_DNS_SELECTED mode=doh", bool(any_all("SECURE_DNS_SELECTED", "mode=doh")))
     require("SECURE_DNS_DOH_CONNECT proxy=socks", bool(any_all("SECURE_DNS_DOH_CONNECT", "proxy=socks")))

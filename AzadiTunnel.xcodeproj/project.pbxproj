@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		A10001012FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		A10002032FCFF95000D0A30A /* tun2socks in Frameworks */ = {isa = PBXBuildFile; productRef = A10002022FCFF95000D0A30A /* tun2socks */; };
 		A10006012FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; };
 		A10006032FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -111,7 +110,6 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10006012FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Frameworks */,
-				A10002032FCFF95000D0A30A /* tun2socks in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -202,7 +200,6 @@
 			);
 			name = AzadiTunnelPacketTunnel;
 			packageProductDependencies = (
-				A10002022FCFF95000D0A30A /* tun2socks */,
 			);
 			productName = AzadiTunnelPacketTunnel;
 			productReference = A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */;
@@ -266,7 +263,6 @@
 			mainGroup = 2C3594342FCFF94200D0A30A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2C35943E2FCFF94200D0A30A /* Products */;
@@ -683,24 +679,6 @@
 		};
 /* End XCConfigurationList section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/zhuhaow/tun2socks";
-			requirement = {
-				kind = revision;
-				revision = 78294d5bff7f81152af64a2b66ffbfe917e1183b;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		A10002022FCFF95000D0A30A /* tun2socks */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A10002012FCFF95000D0A30A /* XCRemoteSwiftPackageReference "tun2socks" */;
-			productName = tun2socks;
-		};
-/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2C3594352FCFF94200D0A30A /* Project object */;
 }

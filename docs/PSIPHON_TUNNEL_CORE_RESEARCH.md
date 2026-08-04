@@ -29,7 +29,9 @@ Build uses **GOPATH mode** (`GO111MODULE=off`), symlinks repo into `GOPATH/src/g
 - API header: `MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h`
 - Sample apps: `TunneledWebView`, `TunneledWebRequest` (local SOCKS/HTTP proxy, not full system VPN in samples)
 
-**Packet tunnel on iOS:** Psiphon mobile library exposes **local port-forward proxies** (SOCKS + HTTP). System-wide VPN is implemented by the host app using **Network Extension** + forwarding `NEPacketTunnelFlow` to the local proxy (e.g. tun2socks for SOCKS). Tunnel-core also has Go `tun` package (`GetPacketTunnelMTU`) for packet mode in other platforms.
+**Packet tunnel on iOS:** The pinned Psiphon core contains a genuine packet-tunnel client in `psiphon/common/tun`: it relays validated TCP and UDP packets over IPv4 and IPv6 and performs transparent DNS rewriting. The upstream iOS wrapper exposed only local SOCKS/HTTP ports and `getPacketTunnelMTU`; it did not expose packet I/O. AzadiTunnel therefore applies [`Tooling/psiphon/patches/packet-tunnel-callback.patch`](../Tooling/psiphon/patches/packet-tunnel-callback.patch), which adds a public gomobile raw-packet callback and connects it to Apple's public `NEPacketTunnelFlow` API. No private Network Extension file descriptor is used.
+
+The local SOCKS/HTTP listeners remain enabled for extension-local Secure DNS and LAN sharing. They are not the full-device forwarding path, and the core's SOCKS listener does not implement UDP ASSOCIATE; the packet path never claims UDP support through SOCKS.
 
 ## Config format
 
@@ -87,8 +89,8 @@ Swift wrapper in AzadiTunnel: `PsiphonTunnelAdapter` bridges to this API when fr
 ## AzadiTunnel integration plan
 
 1. User imports JSON config (no embedded private servers).
-2. Packet Tunnel extension loads config from App Group, starts Psiphon, waits for SOCKS port.
-3. `tun2socks` (or documented HTTP CONNECT path) forwards `packetFlow` to `127.0.0.1:<socksPort>`.
+2. Packet Tunnel extension loads config from App Group, installs the public raw-packet callback, and waits for native packet mode plus core connectivity. Local SOCKS/HTTP ports are optional helpers, not a readiness gate for full-device traffic.
+3. The native packet callback pump forwards raw packets from `packetFlow` into Psiphon's `PacketTunnelTransport` and writes downstream packets back with the correct IPv4/IPv6 protocol value. Queue overflow, malformed IP versions, callback errors, and shutdown are explicit failures; packets are not silently discarded at the iOS boundary.
 4. UI tests on device with `Tests/Fixtures/local-psiphon-config.json` (gitignored).
 
 ## AzadiTunnel build notes (Xcode 26)

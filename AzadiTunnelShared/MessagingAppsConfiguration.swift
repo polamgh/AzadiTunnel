@@ -129,11 +129,6 @@ enum MessagingAppsConfiguration {
     80, 443, 5222, 5223, 5228, 5242,
   ]
 
-  /// Common WhatsApp / Telegram UDP ports (voice, media, QUIC). Logged when dropped — not relayed.
-  static let notableUDPPorts: Set<UInt16> = [
-    443, 5222, 5223, 5228, 5242, 3478, 5349, 4000, 4001, 4002, 4003,
-  ]
-
   static func isTelegramIPv4(_ ip: String) -> Bool {
     guard let value = parseIPv4UInt32(ip) else { return false }
     return telegramCIDRs.contains { (value & $0.mask) == $0.network }

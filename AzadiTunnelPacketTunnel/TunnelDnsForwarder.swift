@@ -3,20 +3,14 @@ import Foundation
 import Network
 import NetworkExtension
 
-#if canImport(tun2socks)
-import tun2socks
-#endif
-
-/// Owns tunnel DNS interception. Secure DNS modes resolve raw DNS wire queries before packets reach tun2socks.
+/// Owns tunnel DNS interception. Secure DNS modes resolve raw DNS wire queries
+/// before packets reach Psiphon's native packet transport.
 enum TunnelDnsForwarder {
     private static var dnsOkLogCount = 0
-    private static var queue: DispatchQueue {
-#if canImport(tun2socks)
-        TSIPStack.stack.processQueue
-#else
-        DispatchQueue(label: "com.polamgh.ali.AzadiTunnel.dns", qos: .userInitiated)
-#endif
-    }
+    private static let queue = DispatchQueue(
+        label: "com.polamgh.ali.AzadiTunnel.dns",
+        qos: .userInitiated
+    )
 
     static func handleIfDnsQuery(
         packet: Data,
@@ -422,7 +416,6 @@ enum TunnelDnsForwarder {
         ]
 
         var lastError: Error = URLError(.cannotFindHost)
-#if canImport(tun2socks)
         if socksPort > 0 {
             for resolver in ["9.9.9.9", "208.67.222.222"] {
                 do {
@@ -438,9 +431,7 @@ enum TunnelDnsForwarder {
                 }
             }
         }
-#endif
         for backend in backends {
-#if canImport(tun2socks)
             if socksPort > 0 {
                 do {
                     let body = try await PsiphonSocksHTTPGet.get(
@@ -454,7 +445,6 @@ enum TunnelDnsForwarder {
                     lastError = error
                 }
             }
-#endif
             if httpPort > 0 {
                 do {
                     var components = URLComponents()

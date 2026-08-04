@@ -8,7 +8,9 @@ enum PsiphonLocalProxyType: String, Sendable {
     case unknown
 }
 
-/// SOCKS is required for tun2socks; HTTP is optional for system proxy hints.
+/// Local proxies remain available for extension-local DNS and LAN sharing. Full
+/// VPN packet forwarding uses the native Psiphon packet tunnel callback and
+/// does not depend on SOCKS UDP ASSOCIATE.
 struct PsiphonLocalProxyEndpoints: Sendable {
     let host: String
     let socksPort: Int
@@ -27,8 +29,23 @@ protocol PsiphonTunnelCoreProtocol: AnyObject, Sendable {
     var localProxyEndpoints: PsiphonLocalProxyEndpoints { get }
     var lastError: String? { get }
 
-    func start(configJSON: String, serverEntriesPath: String?, dataDir: URL) async throws
+    func start(
+        configJSON: String,
+        serverEntriesPath: String?,
+        dataDir: URL,
+        packetTunnel: PsiphonPacketTunnelIO?
+    ) async throws
     func stop() async
+}
+
+/// Raw packet I/O between Network Extension's public packetFlow API and
+/// Psiphon tunnel-core's native packet transport. Implementations must retain
+/// packet order, surface queue overflow as an error, and unblock reads on
+/// close. Packets are complete IPv4/IPv6 packets with no tun header.
+protocol PsiphonPacketTunnelIO: AnyObject, Sendable {
+    func readPacket() throws -> Data
+    func writePacket(_ packet: Data) throws
+    func close()
 }
 
 /// Main app and previews use the stub; extension defines live adapter in its target.
@@ -70,7 +87,12 @@ final class PsiphonTunnelAdapterStub: PsiphonTunnelCoreProtocol, @unchecked Send
         PsiphonLocalProxyEndpoints(host: localProxyHost, socksPort: 0, httpPort: 0)
     }
 
-    func start(configJSON: String, serverEntriesPath: String?, dataDir: URL) async throws {
+    func start(
+        configJSON: String,
+        serverEntriesPath: String?,
+        dataDir: URL,
+        packetTunnel: PsiphonPacketTunnelIO?
+    ) async throws {
         SharedLogger.shared.log(.psiphonStartFailed, detail: lastError)
         throw PsiphonTunnelCoreError.frameworkMissing
     }

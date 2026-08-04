@@ -18,13 +18,8 @@ This file lists third-party software used by AzadiTunnel.
 - **License:** GNU General Public License v3  
 - **Use:** Tunnel client core (iOS `PsiphonTunnel` / `PsiphonTunnelCore.xcframework`). AzadiTunnel links this library in-process in the Network Extension.  
 - **Pinned commit:** See `Tooling/psiphon/PSIPHON_PINNED_COMMIT`  
+- **Packet mode adaptation:** `Tooling/psiphon/patches/packet-tunnel-callback.patch` adds the public raw-packet callback used by the Network Extension; it is part of this corresponding source offer.
 - **Source offer:** Publish AzadiTunnel source at the release tag **and** make tunnel-core source available at the pinned commit (clone URL + commit hash above).
-
-## tun2socks (packet forwarding)
-
-- **Project:** https://github.com/EbrahimTahernejad/tun2socks-swift (Swift Package)  
-- **License:** See upstream repository  
-- **Use:** Forward `NEPacketTunnelFlow` traffic to local Psiphon SOCKS proxy  
 
 ## Apple system frameworks
 

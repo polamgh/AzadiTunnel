@@ -1,10 +1,6 @@
 import Foundation
 import Network
 
-#if canImport(tun2socks)
-import tun2socks
-#endif
-
 /// Minimal SOCKS5 TCP CONNECT client (RFC 1928) to Psiphon local proxy.
 enum Socks5TCPClient {
     enum Socks5Error: LocalizedError {

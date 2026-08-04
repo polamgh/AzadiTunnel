@@ -7,7 +7,6 @@ enum TunnelConnectivityProbe {
     static func verifyGenerate204(endpoints: PsiphonLocalProxyEndpoints) async -> Bool {
         let probeDeadline = Date().addingTimeInterval(75)
         while Date() < probeDeadline {
-#if canImport(tun2socks)
             if endpoints.hasSocks {
                 do {
                     let response = try await Socks5TCPClient.tcpDnsQuery(
@@ -59,7 +58,6 @@ enum TunnelConnectivityProbe {
                     }
                 }
             }
-#endif
 
             try? await Task.sleep(nanoseconds: 4_000_000_000)
         }

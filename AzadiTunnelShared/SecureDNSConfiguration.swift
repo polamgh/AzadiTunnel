@@ -131,7 +131,11 @@ enum SecureDNSConfiguration {
         0x00, 0x01, 0x00, 0x01
     ])
 
-    /// Virtual resolver shown to iOS. UDP/53 is always intercepted in the tunnel forwarder.
+    /// Virtual resolver shown to iOS. The Swift Secure DNS callback currently
+    /// parses IPv4 UDP packets, so keep the advertised resolver on IPv4 while
+    /// Psiphon's native packet transport handles all other IPv4/IPv6 traffic.
+    /// The core's IPv6 transparent-DNS address remains configured for packets
+    /// that reach it directly, but is intentionally not advertised here.
     static func advertisedDnsServers(for settings: AppSettings) -> [String] {
         _ = settings
         return ["10.0.0.1"]

@@ -1,0 +1,695 @@
+diff --git a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
+index 45d7ae3e..fe09c582 100644
+--- a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
++++ b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.h
+@@ -63,6 +63,22 @@ typedef NS_ENUM(NSInteger, PsiphonConnectionState)
+ 
+ @end
+ 
++/*!
++ @protocol PsiphonPacketTunnelProvider
++ Provides raw IPv4 and IPv6 packet I/O for whole-device packet tunnel mode.
++ The implementation must not expose a file descriptor or platform-specific
++ tun header. readPacket may block until a packet is available and must be
++ interrupted by closePacketTunnel.
++ */
++@protocol PsiphonPacketTunnelProvider <NSObject>
++
++- (NSData * _Nullable)readPacket:(NSError * _Nullable * _Nullable)error;
++- (BOOL)writePacket:(NSData * _Nonnull)packet
++              error:(NSError * _Nullable * _Nullable)error;
++- (void)closePacketTunnel;
++
++@end
++
+ /*!
+  @protocol TunneledAppDelegate
+  Used to communicate with the application that is using the PsiphonTunnel framework,
+@@ -343,6 +359,13 @@ followed by a tunnel-core shutdown.
+  */
+ @interface PsiphonTunnel : NSObject
+ 
++/*!
++ Sets the public raw-packet callback used by whole-device packet tunnel mode.
++ The provider must remain alive until `stop` returns. Set it before calling
++ `start:`; it is retained by the tunnel until replaced or cleared.
++ */
++- (void)setPacketTunnelProvider:(id<PsiphonPacketTunnelProvider> _Nullable)packetTunnelProvider;
++
+ /*!
+  Returns an instance of PsiphonTunnel. This is either a new instance or the pre-existing singleton. If an instance already exists, it will be stopped when this function is called.
+  @param tunneledAppDelegate  The delegate implementation to use for callbacks.
+diff --git a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m
+index 1512d250..f58d4b9e 100644
+--- a/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m
++++ b/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel/PsiphonTunnel.m
+@@ -113,6 +113,8 @@ @implementation PsiphonTunnel {
+     _Atomic NSInteger localSocksProxyPort;
+     _Atomic NSInteger localHttpProxyPort;
+ 
++    id<PsiphonPacketTunnelProvider> packetTunnelProvider;
++
+     id<ReachabilityProtocol> reachability;
+     _Atomic NetworkReachability currentNetworkStatus;
+ 
+@@ -180,6 +182,12 @@ - (void)initializeWithAppDelegate:(id<TunneledAppDelegate> _Nullable)appDelegate
+ 
+ #pragma mark - PsiphonTunnel public methods
+ 
++- (void)setPacketTunnelProvider:(id<PsiphonPacketTunnelProvider> _Nullable)provider {
++    @synchronized (PsiphonTunnel.self) {
++        self->packetTunnelProvider = provider;
++    }
++}
++
+ // See comment in header
+ + (NSURL*)defaultDataRootDirectoryWithError:(NSError**)err {
+     *err = nil;
+@@ -343,15 +351,28 @@ - (BOOL)start {
+         @try {
+             NSError *e = nil;
+ 
+-            GoPsiStart(
+-                configStr,
+-                embeddedServerEntries,
+-                embeddedServerEntriesPath,
+-                self,
+-                FALSE, // useDeviceBinder
+-                UseIPv6Synthesizer,
+-                UseHasIPv6RouteGetter,
+-                &e);
++            if (self->packetTunnelProvider != nil) {
++                GoPsiStartPacketTunnel(
++                    configStr,
++                    embeddedServerEntries,
++                    embeddedServerEntriesPath,
++                    self,
++                    (id<GoPsiPsiphonPacketTunnelProvider>)self->packetTunnelProvider,
++                    FALSE, // useDeviceBinder
++                    UseIPv6Synthesizer,
++                    UseHasIPv6RouteGetter,
++                    &e);
++            } else {
++                GoPsiStart(
++                    configStr,
++                    embeddedServerEntries,
++                    embeddedServerEntriesPath,
++                    self,
++                    FALSE, // useDeviceBinder
++                    UseIPv6Synthesizer,
++                    UseHasIPv6RouteGetter,
++                    &e);
++            }
+             
+             if (e != nil) {
+                 [self logMessage:[NSString stringWithFormat: @"Psiphon library start failed: %@", e.localizedDescription]];
+@@ -542,6 +563,10 @@ - (NSString * _Nullable)getConfig:(BOOL * _Nonnull)usingNoticeFiles
+         return nil;
+     }
+ 
++    if (self->packetTunnelProvider != nil) {
++        self->tunnelWholeDevice = TRUE;
++    }
++
+     NSError *err;
+     NSString *psiphonConfig = [PsiphonTunnel buildPsiphonConfig:configObject
+                                               tunnelWholeDevice:&self->tunnelWholeDevice
+@@ -554,6 +579,10 @@ - (NSString * _Nullable)getConfig:(BOOL * _Nonnull)usingNoticeFiles
+         return nil;
+     }
+ 
++    if (self->packetTunnelProvider != nil) {
++        self->tunnelWholeDevice = TRUE;
++    }
++
+     return psiphonConfig;
+ }
+ 
+@@ -805,7 +834,7 @@ + (NSString * _Nullable)buildPsiphonConfig:(id _Nonnull)configObject
+     //
+ 
+     // We'll record our state about what mode we're in.
+-    *tunnelWholeDevice = (config[@"PacketTunnelTunFileDescriptor"] != nil);
++    *tunnelWholeDevice = (*tunnelWholeDevice || config[@"PacketTunnelTunFileDescriptor"] != nil);
+ 
+     // Optional fields not being altered. If not set, their defaults will be used:
+     // * LocalSocksProxyPort
+diff --git a/MobileLibrary/psi/psi.go b/MobileLibrary/psi/psi.go
+index af289ded..c0391b53 100644
+--- a/MobileLibrary/psi/psi.go
++++ b/MobileLibrary/psi/psi.go
+@@ -73,6 +73,35 @@ type PsiphonProvider interface {
+ 	GetDNSServersAsString() string
+ }
+ 
++// PsiphonPacketTunnelProvider is the public raw-packet boundary used by the
++// iOS Network Extension adapter. Packets are complete IPv4 or IPv6 packets;
++// no platform tun file descriptor or tun header is involved. ReadPacket may
++// block until the host packet flow provides a packet, and ClosePacketTunnel
++// must interrupt blocked calls.
++type PsiphonPacketTunnelProvider interface {
++	ReadPacket() ([]byte, error)
++	WritePacket(packet []byte) error
++	ClosePacketTunnel()
++}
++
++type packetTunnelDevice struct {
++	provider  PsiphonPacketTunnelProvider
++	closeOnce sync.Once
++}
++
++func (device *packetTunnelDevice) ReadPacket() ([]byte, error) {
++	return device.provider.ReadPacket()
++}
++
++func (device *packetTunnelDevice) WritePacket(packet []byte) error {
++	return device.provider.WritePacket(packet)
++}
++
++func (device *packetTunnelDevice) Close() error {
++	device.closeOnce.Do(device.provider.ClosePacketTunnel)
++	return nil
++}
++
+ type PsiphonProviderFeedbackHandler interface {
+ 	SendFeedbackCompleted(err error)
+ }
+@@ -203,6 +232,55 @@ func Start(
+ 	useIPv6Synthesizer bool,
+ 	useHasIPv6RouteGetter bool) error {
+ 
++	return start(
++		configJson,
++		embeddedServerEntryList,
++		embeddedServerEntryListFilename,
++		provider,
++		nil,
++		useDeviceBinder,
++		useIPv6Synthesizer,
++		useHasIPv6RouteGetter)
++}
++
++// StartPacketTunnel starts tunnel-core with an application-provided raw
++// packet callback. This is the mobile-safe equivalent of
++// PacketTunnelTunFileDescriptor for Network Extension packet flows.
++func StartPacketTunnel(
++	configJson string,
++	embeddedServerEntryList string,
++	embeddedServerEntryListFilename string,
++	provider PsiphonProvider,
++	packetProvider PsiphonPacketTunnelProvider,
++	useDeviceBinder bool,
++	useIPv6Synthesizer bool,
++	useHasIPv6RouteGetter bool) error {
++
++	if packetProvider == nil {
++		return errors.TraceNew("packet tunnel provider is required")
++	}
++
++	return start(
++		configJson,
++		embeddedServerEntryList,
++		embeddedServerEntryListFilename,
++		provider,
++		packetProvider,
++		useDeviceBinder,
++		useIPv6Synthesizer,
++		useHasIPv6RouteGetter)
++}
++
++func start(
++	configJson string,
++	embeddedServerEntryList string,
++	embeddedServerEntryListFilename string,
++	provider PsiphonProvider,
++	packetProvider PsiphonPacketTunnelProvider,
++	useDeviceBinder bool,
++	useIPv6Synthesizer bool,
++	useHasIPv6RouteGetter bool) error {
++
+ 	controllerMutex.Lock()
+ 	defer controllerMutex.Unlock()
+ 
+@@ -230,6 +308,18 @@ func Start(
+ 		return errors.Trace(err)
+ 	}
+ 
++	var packetDevice tun.PacketTunnelDevice
++	if packetProvider != nil {
++		packetDevice = &packetTunnelDevice{provider: packetProvider}
++		config.PacketTunnelDevice = packetDevice
++	}
++	packetControllerStarted := false
++	defer func() {
++		if !packetControllerStarted && packetDevice != nil {
++			_ = packetDevice.Close()
++		}
++	}()
++
+ 	// Set up callbacks.
+ 
+ 	config.NetworkConnectivityChecker = wrappedProvider
+@@ -316,6 +406,7 @@ func Start(
+ 		psiphon.ResetNoticeWriter()
+ 		return errors.Trace(err)
+ 	}
++	packetControllerStarted = true
+ 
+ 	controllerWaitGroup = new(sync.WaitGroup)
+ 	controllerWaitGroup.Add(1)
+diff --git a/MobileLibrary/psi/psi_test.go b/MobileLibrary/psi/psi_test.go
+new file mode 100644
+index 00000000..b6eda072
+--- /dev/null
++++ b/MobileLibrary/psi/psi_test.go
+@@ -0,0 +1,71 @@
++/*
++ * Copyright (c) 2026, Psiphon Inc.
++ * All rights reserved.
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ */
++
++package psi
++
++import (
++	"errors"
++	"sync"
++	"sync/atomic"
++	"testing"
++)
++
++type testPacketProvider struct {
++	readError  error
++	writeError error
++	closeCount atomic.Int32
++}
++
++func (provider *testPacketProvider) ReadPacket() ([]byte, error) {
++	return nil, provider.readError
++}
++
++func (provider *testPacketProvider) WritePacket([]byte) error {
++	return provider.writeError
++}
++
++func (provider *testPacketProvider) ClosePacketTunnel() {
++	provider.closeCount.Add(1)
++}
++
++func TestPacketTunnelDevicePropagatesIOErrors(t *testing.T) {
++	readError := errors.New("read failed")
++	writeError := errors.New("write failed")
++	provider := &testPacketProvider{readError: readError, writeError: writeError}
++	device := &packetTunnelDevice{provider: provider}
++
++	if _, err := device.ReadPacket(); !errors.Is(err, readError) {
++		t.Fatalf("ReadPacket error = %v, want %v", err, readError)
++	}
++	if err := device.WritePacket([]byte{0x45}); !errors.Is(err, writeError) {
++		t.Fatalf("WritePacket error = %v, want %v", err, writeError)
++	}
++}
++
++func TestPacketTunnelDeviceConcurrentCloseCallsProviderOnce(t *testing.T) {
++	provider := &testPacketProvider{}
++	device := &packetTunnelDevice{provider: provider}
++
++	var waitGroup sync.WaitGroup
++	waitGroup.Add(32)
++	for i := 0; i < 32; i++ {
++		go func() {
++			defer waitGroup.Done()
++			if err := device.Close(); err != nil {
++				t.Errorf("Close failed: %v", err)
++			}
++		}()
++	}
++	waitGroup.Wait()
++
++	if count := provider.closeCount.Load(); count != 1 {
++		t.Fatalf("ClosePacketTunnel called %d times, want 1", count)
++	}
++}
+diff --git a/psiphon/common/tun/tun.go b/psiphon/common/tun/tun.go
+index 11bd201b..62805ab5 100644
+--- a/psiphon/common/tun/tun.go
++++ b/psiphon/common/tun/tun.go
+@@ -1804,6 +1804,19 @@ func (queue *PacketQueue) Replace(buffer []byte) {
+ 	queue.emptyBuffers <- buffer
+ }
+ 
++// PacketTunnelDevice is the packet I/O boundary used by a packet tunnel
++// client. Implementations provide raw IP packets without platform-specific
++// tun headers. Close must interrupt any blocked ReadPacket or WritePacket
++// call.
++//
++// This interface is intentionally separate from io.ReadWriteCloser so mobile
++// bindings can expose packet I/O without exposing a platform file descriptor.
++type PacketTunnelDevice interface {
++	ReadPacket() ([]byte, error)
++	WritePacket(packet []byte) error
++	Close() error
++}
++
+ // ClientConfig specifies the configuration of a packet tunnel client.
+ type ClientConfig struct {
+ 
+@@ -1837,6 +1850,12 @@ type ClientConfig struct {
+ 	// tunnel server.
+ 	Transport io.ReadWriteCloser
+ 
++	// PacketDevice specifies an already-created packet I/O boundary. When set,
++	// the Client uses this device instead of TunFileDescriptor or a platform
++	// tun device. Packets are raw IPv4 or IPv6 packets, with no platform tun
++	// header. This is intended for public mobile packet-flow APIs.
++	PacketDevice PacketTunnelDevice
++
+ 	// TunFileDescriptor specifies a file descriptor to use to
+ 	// read and write packets to be relayed to the client. When
+ 	// TunFileDescriptor is specified, the Client will use this
+@@ -1935,7 +1954,9 @@ func NewClient(config *ClientConfig) (*Client, error) {
+ 	var device *Device
+ 	var err error
+ 
+-	if config.TunFileDescriptor > 0 {
++	if config.PacketDevice != nil {
++		device, err = NewClientDeviceFromPacketDevice(config)
++	} else if config.TunFileDescriptor > 0 {
+ 		device, err = NewClientDeviceFromFD(config)
+ 	} else {
+ 		device, err = NewClientDevice(config)
+@@ -2970,6 +2991,7 @@ type Device struct {
+ 	name           string
+ 	writeMutex     sync.Mutex
+ 	deviceIO       io.ReadWriteCloser
++	packetDevice   PacketTunnelDevice
+ 	inboundBuffer  []byte
+ 	outboundBuffer []byte
+ }
+@@ -3049,6 +3071,24 @@ func NewClientDeviceFromFD(config *ClientConfig) (*Device, error) {
+ 	}, nil
+ }
+ 
++// NewClientDeviceFromPacketDevice wraps a raw packet I/O boundary. Unlike a
++// file-descriptor-backed tun device, this path does not use platform tun
++// headers and does not access private Network Extension state.
++func NewClientDeviceFromPacketDevice(config *ClientConfig) (*Device, error) {
++	if config.PacketDevice == nil {
++		return nil, errors.TraceNew("packet device is required")
++	}
++
++	MTU := getMTU(config.MTU)
++
++	return &Device{
++		name:           "",
++		packetDevice:   config.PacketDevice,
++		inboundBuffer:  makeDeviceInboundBuffer(MTU),
++		outboundBuffer: makeDeviceOutboundBuffer(MTU),
++	}, nil
++}
++
+ // Name returns the interface name for a created tun device,
+ // or returns "" for a device created by NewClientDeviceFromFD.
+ // The interface name may be used for additional network and
+@@ -3062,6 +3102,16 @@ func (device *Device) Name() string {
+ // value is only valid until the next ReadPacket call.
+ // Concurrent calls to ReadPacket are _not_ supported.
+ func (device *Device) ReadPacket() ([]byte, error) {
++	if device.packetDevice != nil {
++		packet, err := device.packetDevice.ReadPacket()
++		if err != nil {
++			return nil, errors.Trace(err)
++		}
++		if len(packet) == 0 {
++			return nil, errors.TraceNew("packet device returned an empty packet")
++		}
++		return packet, nil
++	}
+ 
+ 	// readTunPacket performs the platform dependent
+ 	// packet read operation.
+@@ -3082,6 +3132,13 @@ func (device *Device) WritePacket(packet []byte) error {
+ 	device.writeMutex.Lock()
+ 	defer device.writeMutex.Unlock()
+ 
++	if device.packetDevice != nil {
++		if err := device.packetDevice.WritePacket(packet); err != nil {
++			return errors.Trace(err)
++		}
++		return nil
++	}
++
+ 	// writeTunPacket performs the platform dependent
+ 	// packet write operation.
+ 	err := device.writeTunPacket(packet)
+@@ -3095,6 +3152,9 @@ func (device *Device) WritePacket(packet []byte) error {
+ // Close interrupts any blocking Read/Write calls and
+ // tears down the tun device.
+ func (device *Device) Close() error {
++	if device.packetDevice != nil {
++		return device.packetDevice.Close()
++	}
+ 	return device.deviceIO.Close()
+ }
+ 
+diff --git a/psiphon/common/tun/tun_test.go b/psiphon/common/tun/tun_test.go
+index 082012bf..fa331b47 100644
+--- a/psiphon/common/tun/tun_test.go
++++ b/psiphon/common/tun/tun_test.go
+@@ -31,6 +31,7 @@ import (
+ 	"net"
+ 	"os"
+ 	"strconv"
++	"strings"
+ 	"sync"
+ 	"sync/atomic"
+ 	"syscall"
+@@ -53,6 +54,169 @@ const (
+ 	PACKET_METRICS_TIMEOUT  = 10 * time.Second
+ )
+ 
++type testPacketTunnelDevice struct {
++	readPacket  []byte
++	wrotePacket []byte
++	closed      bool
++}
++
++type blockingPacketTunnelDevice struct {
++	closed    chan struct{}
++	closeOnce sync.Once
++}
++
++func newBlockingPacketTunnelDevice() *blockingPacketTunnelDevice {
++	return &blockingPacketTunnelDevice{closed: make(chan struct{})}
++}
++
++func (device *blockingPacketTunnelDevice) ReadPacket() ([]byte, error) {
++	<-device.closed
++	return nil, errors.New("packet device closed")
++}
++
++func (device *blockingPacketTunnelDevice) WritePacket([]byte) error {
++	select {
++	case <-device.closed:
++		return errors.New("packet device closed")
++	default:
++		return nil
++	}
++}
++
++func (device *blockingPacketTunnelDevice) Close() error {
++	device.closeOnce.Do(func() { close(device.closed) })
++	return nil
++}
++
++type blockingPacketTunnelTransport struct {
++	closed    chan struct{}
++	closeOnce sync.Once
++}
++
++func newBlockingPacketTunnelTransport() *blockingPacketTunnelTransport {
++	return &blockingPacketTunnelTransport{closed: make(chan struct{})}
++}
++
++func (transport *blockingPacketTunnelTransport) Read([]byte) (int, error) {
++	<-transport.closed
++	return 0, errors.New("transport closed")
++}
++
++func (transport *blockingPacketTunnelTransport) Write(packet []byte) (int, error) {
++	select {
++	case <-transport.closed:
++		return 0, errors.New("transport closed")
++	default:
++		return len(packet), nil
++	}
++}
++
++func (transport *blockingPacketTunnelTransport) Close() error {
++	transport.closeOnce.Do(func() { close(transport.closed) })
++	return nil
++}
++
++func (device *testPacketTunnelDevice) ReadPacket() ([]byte, error) {
++	return device.readPacket, nil
++}
++
++func (device *testPacketTunnelDevice) WritePacket(packet []byte) error {
++	device.wrotePacket = append([]byte(nil), packet...)
++	return nil
++}
++
++func (device *testPacketTunnelDevice) Close() error {
++	device.closed = true
++	return nil
++}
++
++func TestClientDeviceFromPacketDeviceUsesRawPackets(t *testing.T) {
++	input := []byte{0x60, 0x00, 0x00, 0x00, 0x00, 0x08, 0x11, 0x40}
++	packetDevice := &testPacketTunnelDevice{readPacket: input}
++
++	device, err := NewClientDeviceFromPacketDevice(&ClientConfig{
++		PacketDevice: packetDevice,
++	})
++	if err != nil {
++		t.Fatalf("NewClientDeviceFromPacketDevice failed: %v", err)
++	}
++
++	packet, err := device.ReadPacket()
++	if err != nil {
++		t.Fatalf("ReadPacket failed: %v", err)
++	}
++	if !bytes.Equal(packet, input) {
++		t.Fatalf("ReadPacket returned %x, want %x", packet, input)
++	}
++
++	output := []byte{0x45, 0x00, 0x00, 0x14, 0x00, 0x00, 0x40, 0x00}
++	if err := device.WritePacket(output); err != nil {
++		t.Fatalf("WritePacket failed: %v", err)
++	}
++	if !bytes.Equal(packetDevice.wrotePacket, output) {
++		t.Fatalf("WritePacket sent %x, want %x", packetDevice.wrotePacket, output)
++	}
++
++	if err := device.Close(); err != nil {
++		t.Fatalf("Close failed: %v", err)
++	}
++	if !packetDevice.closed {
++		t.Fatal("Close did not close the callback device")
++	}
++}
++
++func TestClientDeviceFromPacketDeviceCloseInterruptsRead(t *testing.T) {
++	packetDevice := newBlockingPacketTunnelDevice()
++	device, err := NewClientDeviceFromPacketDevice(&ClientConfig{PacketDevice: packetDevice})
++	if err != nil {
++		t.Fatalf("NewClientDeviceFromPacketDevice failed: %v", err)
++	}
++
++	readResult := make(chan error, 1)
++	go func() {
++		_, readErr := device.ReadPacket()
++		readResult <- readErr
++	}()
++
++	if err := device.Close(); err != nil {
++		t.Fatalf("Close failed: %v", err)
++	}
++	select {
++	case readErr := <-readResult:
++		if readErr == nil || !strings.Contains(readErr.Error(), "packet device closed") {
++			t.Fatalf("ReadPacket error = %v, want close error", readErr)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("ReadPacket remained blocked after Close")
++	}
++}
++
++func TestClientConcurrentStopClosesPacketDevice(t *testing.T) {
++	packetDevice := newBlockingPacketTunnelDevice()
++	transport := newBlockingPacketTunnelTransport()
++	client, err := NewClient(&ClientConfig{
++		Logger:       testutils.NewTestLogger(),
++		PacketDevice: packetDevice,
++		Transport:    transport,
++	})
++	if err != nil {
++		t.Fatalf("NewClient failed: %v", err)
++	}
++	client.Start()
++
++	var waitGroup sync.WaitGroup
++	waitGroup.Add(2)
++	go func() {
++		defer waitGroup.Done()
++		client.Stop()
++	}()
++	go func() {
++		defer waitGroup.Done()
++		client.Stop()
++	}()
++	waitGroup.Wait()
++}
++
+ func TestTunneledTCPIPv4(t *testing.T) {
+ 	testTunneledTCP(t, false)
+ }
+diff --git a/psiphon/config.go b/psiphon/config.go
+index 1797eee2..1805da1b 100644
+--- a/psiphon/config.go
++++ b/psiphon/config.go
+@@ -561,6 +561,11 @@ type Config struct {
+ 	// set, TunnelPoolSize must be 1.
+ 	PacketTunnelTunFileDescriptor int `json:",omitempty"`
+ 
++	// PacketTunnelDevice is an application-provided raw packet I/O boundary.
++	// It is populated by the mobile-library callback adapter and is never
++	// decoded from JSON.
++	PacketTunnelDevice tun.PacketTunnelDevice `json:"-"`
++
+ 	// PacketTunnelTransparentDNSIPv4Address is the IPv4 address of the DNS
+ 	// server configured by a VPN using a packet tunnel. All DNS packets
+ 	// destined to this DNS server are transparently redirected to the
+@@ -1819,7 +1824,7 @@ func (config *Config) Commit(migrateFromLegacyFields bool) error {
+ 
+ 	// This constraint is expected by logic in Controller.runTunnels().
+ 
+-	if config.PacketTunnelTunFileDescriptor > 0 && config.TunnelPoolSize != 1 {
++	if (config.PacketTunnelTunFileDescriptor > 0 || config.PacketTunnelDevice != nil) && config.TunnelPoolSize != 1 {
+ 		return errors.TraceNew("packet tunnel mode requires TunnelPoolSize to be 1")
+ 	}
+ 
+diff --git a/psiphon/controller.go b/psiphon/controller.go
+index 948488b4..f726bd1e 100644
+--- a/psiphon/controller.go
++++ b/psiphon/controller.go
+@@ -249,7 +249,7 @@ func NewController(config *Config) (controller *Controller, err error) {
+ 		TrustedCACertificatesFilename: controller.config.TrustedCACertificatesFilename,
+ 	}
+ 
+-	if config.PacketTunnelTunFileDescriptor > 0 {
++	if config.PacketTunnelTunFileDescriptor > 0 || config.PacketTunnelDevice != nil {
+ 
+ 		// Run a packet tunnel client. The lifetime of the tun.Client is the
+ 		// lifetime of the Controller, so it exists across tunnel establishments
+@@ -262,6 +262,7 @@ func NewController(config *Config) (controller *Controller, err error) {
+ 		packetTunnelClient, err := tun.NewClient(&tun.ClientConfig{
+ 			Logger:                    NoticeCommonLogger(false),
+ 			TunFileDescriptor:         config.PacketTunnelTunFileDescriptor,
++			PacketDevice:              config.PacketTunnelDevice,
+ 			TransparentDNSIPv4Address: config.PacketTunnelTransparentDNSIPv4Address,
+ 			TransparentDNSIPv6Address: config.PacketTunnelTransparentDNSIPv6Address,
+ 			Transport:                 packetTunnelTransport,
+@@ -2886,6 +2887,7 @@ func (controller *Controller) launchEstablishing() {
+ 
+ 	tunnelPoolSize := p.Int(parameters.TunnelPoolSize)
+ 	if controller.config.PacketTunnelTunFileDescriptor > 0 ||
++		controller.config.PacketTunnelDevice != nil ||
+ 		controller.config.TargetServerEntry != "" {
+ 		tunnelPoolSize = 1
+ 	}
+

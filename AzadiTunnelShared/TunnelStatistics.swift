@@ -21,7 +21,7 @@ struct TunnelStatistics: Codable, Equatable {
     var conduitStatusUpdatedAt: Date?
     var connectedCity: String = ""
     var connectedCountry: String = ""
-    /// TCP flows successfully relayed through tun2socks → SOCKS (real browsing path).
+    /// Legacy local SOCKS TCP relay sessions (packet-mode traffic is counted by Psiphon).
     var tcpRelaySessions: UInt64 = 0
     /// True when connected in Proxy Only mode (no full-device routing).
     var proxyOnlyModeActive: Bool = false

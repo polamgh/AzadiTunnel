@@ -18,7 +18,7 @@ Connect flow follows [Shiro Khorshid / Psiphon iOS samples](https://github.com/s
 | [LICENSE](LICENSE) | Full GNU General Public License v3 text |
 | [COPYRIGHT.md](COPYRIGHT.md) | Copyright and source-offer summary |
 | [LEGAL_NOTES.md](LEGAL_NOTES.md) | Distribution, App Store, and compliance notes |
-| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Psiphon, tunnel-core, tun2socks, Apple SDKs |
+| [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) | Psiphon, tunnel-core, Apple SDKs |
 
 **Corresponding source** for distributed binaries:
 

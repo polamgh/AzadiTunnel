@@ -15,10 +15,20 @@ final class PsiphonTunnelEngine: @unchecked Sendable {
     var localProxyEndpoints: PsiphonLocalProxyEndpoints { core.localProxyEndpoints }
     var lastError: String? { core.lastError }
 
-    func start(configJSON: String, serverEntriesPath: String?, dataDir: URL) async throws {
+    func start(
+        configJSON: String,
+        serverEntriesPath: String?,
+        dataDir: URL,
+        packetTunnel: PsiphonPacketTunnelIO? = nil
+    ) async throws {
         SharedLogger.shared.log(.psiphonConnectRequested)
         do {
-            try await core.start(configJSON: configJSON, serverEntriesPath: serverEntriesPath, dataDir: dataDir)
+            try await core.start(
+                configJSON: configJSON,
+                serverEntriesPath: serverEntriesPath,
+                dataDir: dataDir,
+                packetTunnel: packetTunnel
+            )
             let ep = core.localProxyEndpoints
             SharedLogger.shared.log(
                 .psiphonConnected,

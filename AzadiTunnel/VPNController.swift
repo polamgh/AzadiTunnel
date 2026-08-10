@@ -28,6 +28,11 @@ final class VPNController: ObservableObject {
     private let providerBundleID = "com.polamgh.ali.AzadiTunnel.PacketTunnel"
     private var reconnectTask: Task<Void, Never>?
     private var recoveryTask: Task<Bool, Never>?
+    private var connectionStatusObserver: NSObjectProtocol?
+    /// Non-nil from the moment a new attempt token is published until iOS
+    /// acknowledges the start with connecting/reasserting/connected.
+    private var pendingStartAttemptID: String?
+    private var transientDisconnectLoggedForAttemptID: String?
     /// User tapped Disconnect — keep UI on Disconnected while iOS tears down the tunnel.
     private var optimisticDisconnect = false
     /// Skip haptics until the first system status sync (avoids feedback on cold launch).
@@ -37,12 +42,19 @@ final class VPNController: ObservableObject {
         Task { await refreshStatusFromSystem() }
     }
 
+    deinit {
+        if let connectionStatusObserver {
+            NotificationCenter.default.removeObserver(connectionStatusObserver)
+        }
+    }
+
     func refreshStatusFromSystem() async {
         defer { statusHapticsEnabled = true }
         do {
             manager = try await VPNProfileCoordinator.loadManager()
             if let manager {
                 vpnOnDemandEnabledOnDevice = manager.isOnDemandEnabled
+                observeConnection(manager, synchronizeImmediately: false)
             }
             updateFromManager()
         } catch {
@@ -71,6 +83,28 @@ final class VPNController: ObservableObject {
     /// Refresh NE status before Connect/Disconnect so UI matches iOS when the tunnel died externally.
     func prepareForUserToggle() async {
         await refreshStatusFromSystem()
+    }
+
+    /// Gives immediate visual acknowledgement for a Connect tap. The actual
+    /// NetworkExtension state remains authoritative and is published separately.
+    func beginUserConnectFeedback() {
+        guard status == .disconnected || status == .error else { return }
+        lastError = nil
+        banner = .none
+        presentConnectingState()
+        SharedLogger.shared.logRaw("VPN_CONNECT_UI_FEEDBACK", detail: "source=power_button")
+    }
+
+    private func presentConnectingState() {
+        status = .connecting
+        statusMessage = "Connecting…"
+    }
+
+    /// Keep the dashboard visibly busy while the recovery runner intentionally
+    /// stops one serial candidate before starting the next one.
+    private var shouldPresentConnectingDuringRecovery: Bool {
+        let gate = RecoverySessionGate.shared
+        return gate.activeSessionID != nil && !gate.cancellationRequested
     }
 
     func refreshStatistics() {
@@ -147,19 +181,22 @@ final class VPNController: ObservableObject {
             return
         }
 
+        if ProxyOnlyWiFiRequirement.isBlocked {
+            SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=vpn_controller")
+            SharedLogger.shared.log(.proxyOnlyDisableOffered)
+            showProxyOnlyNoWiFiPrompt = true
+            applyDisconnectedState()
+            return
+        }
+
+        presentConnectingState()
+
         let selection = SharedSettingsStore.shared.appSettings.protocolSelection
         if !skipFallbackChain, FallbackChainController.shouldUseChain(for: selection) {
             let ok = await FallbackChainController.connectWithChain(vpn: self)
             if !ok, lastError == nil {
                 setFallbackFailureMessage("Could not connect. See Logs for FALLBACK_* lines.")
             }
-            return
-        }
-
-        if ProxyOnlyWiFiRequirement.isBlocked {
-            SharedLogger.shared.log(.proxyOnlyBlockedNoWifi, detail: "source=vpn_controller")
-            SharedLogger.shared.log(.proxyOnlyDisableOffered)
-            showProxyOnlyNoWiFiPrompt = true
             return
         }
 
@@ -196,8 +233,11 @@ final class VPNController: ObservableObject {
     }
 
     private func startTunnel() async {
+        let attemptID = UUID().uuidString
+        pendingStartAttemptID = attemptID
+        transientDisconnectLoggedForAttemptID = nil
+        SharedSettingsStore.shared.beginVPNAttempt(attemptID)
         SharedLogger.shared.log(.vpnConnectRequested)
-        SharedSettingsStore.shared.vpnStatus = .connecting
         status = .connecting
         statusMessage = "Connecting…"
         if SharedSettingsStore.shared.effectiveAppSettings.protocolSelection == .conduit {
@@ -208,37 +248,137 @@ final class VPNController: ObservableObject {
 
         do {
             let mgr = try await ensureManager()
-            if mgr.connection.status == .connected || mgr.connection.status == .connecting {
+            switch mgr.connection.status {
+            case .connected, .connecting, .reasserting:
                 SharedLogger.shared.logRaw(
                     "VPN_START_RESET_STALE",
                     detail: "ne_status=\(mgr.connection.status.rawValue)"
                 )
                 mgr.connection.stopVPNTunnel()
-                try? await TaskSleep.milliseconds(500)
+                guard await waitForDisconnected(on: mgr, attemptID: attemptID) else {
+                    throw VPNLifecycleError.stopDidNotSettle
+                }
+            case .disconnecting:
+                guard await waitForDisconnected(on: mgr, attemptID: attemptID) else {
+                    throw VPNLifecycleError.stopDidNotSettle
+                }
+            case .disconnected, .invalid:
+                break
+            @unknown default:
+                throw VPNLifecycleError.stopDidNotSettle
             }
+
+            guard pendingStartAttemptID == attemptID else { return }
             optimisticDisconnect = false
+            observeConnection(mgr, synchronizeImmediately: false)
             SharedLogger.shared.log(.vpnStartRequested)
-            try await startVPNTunnel(on: mgr)
-            observeConnection(mgr)
+            let startedManager = try await startVPNTunnel(on: mgr, attemptID: attemptID)
+            manager = startedManager
+            if startedManager !== mgr {
+                observeConnection(startedManager, synchronizeImmediately: false)
+            }
+
+            let acknowledged = await waitForStartAcknowledgement(
+                on: startedManager,
+                attemptID: attemptID
+            )
+            guard pendingStartAttemptID == attemptID || acknowledged else { return }
+            guard acknowledged else {
+                throw VPNLifecycleError.startNotAcknowledged
+            }
+            pendingStartAttemptID = nil
+            transientDisconnectLoggedForAttemptID = nil
+            updateFromManager()
         } catch {
+            guard pendingStartAttemptID == attemptID else { return }
+            pendingStartAttemptID = nil
+            transientDisconnectLoggedForAttemptID = nil
+            SharedSettingsStore.shared.endVPNAttempt(ifMatching: attemptID)
             handleConnectFailure(error)
         }
     }
 
-    private func startVPNTunnel(on mgr: NETunnelProviderManager) async throws {
+    private func startVPNTunnel(
+        on mgr: NETunnelProviderManager,
+        attemptID: String
+    ) async throws -> NETunnelProviderManager {
+        let options: [String: NSObject] = [
+            AppGroupConstants.vpnAttemptOptionKey: attemptID as NSString
+        ]
         do {
-            try mgr.connection.startVPNTunnel()
+            try mgr.connection.startVPNTunnel(options: options)
+            return mgr
         } catch {
             guard VPNProfileCoordinator.isConfigurationDisabledError(error) else { throw error }
             SharedLogger.shared.logRaw("VPN_CONFIG_DISABLED", detail: "action=reenable_and_retry")
             let settings = SharedSettingsStore.shared.appSettings
             let repaired = try await VPNProfileCoordinator.ensureEnabled(manager: mgr, settings: settings)
             manager = repaired
-            try repaired.connection.startVPNTunnel()
+            try repaired.connection.startVPNTunnel(options: options)
+            return repaired
         }
     }
 
+    private func waitForDisconnected(
+        on mgr: NETunnelProviderManager,
+        attemptID: String
+    ) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime
+            + RecoveryTimingDefaults.networkExtensionStopTimeout
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            guard pendingStartAttemptID == attemptID, !Task.isCancelled else { return false }
+            switch mgr.connection.status {
+            case .disconnected, .invalid:
+                return true
+            case .connected, .connecting, .reasserting, .disconnecting:
+                break
+            @unknown default:
+                break
+            }
+            try? await TaskSleep.milliseconds(100)
+        }
+        SharedLogger.shared.logRaw(
+            "VPN_STOP_SETTLE_TIMEOUT",
+            detail: "ne_status=\(mgr.connection.status.rawValue) timeout_s=\(Int(RecoveryTimingDefaults.networkExtensionStopTimeout))"
+        )
+        return false
+    }
+
+    private func waitForStartAcknowledgement(
+        on mgr: NETunnelProviderManager,
+        attemptID: String
+    ) async -> Bool {
+        let deadline = ProcessInfo.processInfo.systemUptime
+            + RecoveryTimingDefaults.networkExtensionStartAcknowledgement
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            guard pendingStartAttemptID == attemptID, !Task.isCancelled else {
+                return mgr.connection.status == .connecting
+                    || mgr.connection.status == .reasserting
+                    || mgr.connection.status == .connected
+            }
+            switch mgr.connection.status {
+            case .connecting, .reasserting, .connected:
+                SharedLogger.shared.logRaw(
+                    "VPN_START_ACKNOWLEDGED",
+                    detail: "id=\(String(attemptID.prefix(8))) ne_status=\(mgr.connection.status.rawValue)"
+                )
+                return true
+            case .disconnected, .invalid, .disconnecting:
+                break
+            @unknown default:
+                break
+            }
+            try? await TaskSleep.milliseconds(100)
+        }
+        SharedLogger.shared.logRaw(
+            "VPN_START_ACK_TIMEOUT",
+            detail: "id=\(String(attemptID.prefix(8))) ne_status=\(mgr.connection.status.rawValue) timeout_s=\(Int(RecoveryTimingDefaults.networkExtensionStartAcknowledgement))"
+        )
+        return false
+    }
+
     private func handleConnectFailure(_ error: Error) {
+        SharedSettingsStore.shared.endVPNAttempt()
         if VPNProfileCoordinator.isConfigurationDisabledError(error) {
             lastError = nil
             status = .error
@@ -264,6 +404,9 @@ final class VPNController: ObservableObject {
     }
 
     func setFallbackFailureMessage(_ message: String) {
+        pendingStartAttemptID = nil
+        transientDisconnectLoggedForAttemptID = nil
+        SharedSettingsStore.shared.endVPNAttempt()
         lastError = message
         status = .error
         statusMessage = "Failed"
@@ -273,6 +416,8 @@ final class VPNController: ObservableObject {
 
     func disconnect(cancelRecovery: Bool = true) async {
         reconnectTask?.cancel()
+        pendingStartAttemptID = nil
+        transientDisconnectLoggedForAttemptID = nil
         if cancelRecovery {
             RecoverySessionGate.shared.cancelActiveSession()
             recoveryTask?.cancel()
@@ -325,10 +470,16 @@ final class VPNController: ObservableObject {
             appSettings.conduitFallbackToPublic = false
             SharedSettingsStore.shared.updateAppSettings(appSettings, logKey: "conduit_fallback_reset")
         }
+        SharedSettingsStore.shared.vpnStatus = .disconnected
+        SharedSettingsStore.shared.endVPNAttempt()
+        banner = .none
+        if shouldPresentConnectingDuringRecovery {
+            presentConnectingState()
+            refreshStatistics()
+            return
+        }
         status = .disconnected
         statusMessage = "Disconnected"
-        SharedSettingsStore.shared.vpnStatus = .disconnected
-        banner = .none
         refreshStatistics()
         playVPNStatusHapticIfNeeded(from: previous, to: .disconnected)
     }
@@ -476,8 +627,14 @@ final class VPNController: ObservableObject {
         }
     }
 
-    private func observeConnection(_ mgr: NETunnelProviderManager) {
-        NotificationCenter.default.addObserver(
+    private func observeConnection(
+        _ mgr: NETunnelProviderManager,
+        synchronizeImmediately: Bool = true
+    ) {
+        if let connectionStatusObserver {
+            NotificationCenter.default.removeObserver(connectionStatusObserver)
+        }
+        connectionStatusObserver = NotificationCenter.default.addObserver(
             forName: .NEVPNStatusDidChange,
             object: mgr.connection,
             queue: .main
@@ -486,7 +643,9 @@ final class VPNController: ObservableObject {
                 self?.updateFromManager()
             }
         }
-        updateFromManager()
+        if synchronizeImmediately {
+            updateFromManager()
+        }
     }
 
     func syncStatusFromSharedStore() {
@@ -514,6 +673,13 @@ final class VPNController: ObservableObject {
 
     private func updateFromManager() {
         guard let connection = manager?.connection else {
+            if pendingStartAttemptID != nil {
+                return
+            }
+            if shouldPresentConnectingDuringRecovery {
+                presentConnectingState()
+                return
+            }
             if optimisticDisconnect {
                 applyDisconnectedState()
             } else {
@@ -522,6 +688,25 @@ final class VPNController: ObservableObject {
                 status = shared
                 playVPNStatusHapticIfNeeded(from: previous, to: shared)
             }
+            return
+        }
+
+        // NetworkExtension may briefly publish the previous session's state
+        // after a new start request. Keep this attempt at `connecting` until
+        // iOS has acknowledged startVPNTunnel with an active NE status.
+        if let attemptID = pendingStartAttemptID {
+            if (connection.status == .disconnected || connection.status == .invalid),
+               transientDisconnectLoggedForAttemptID != attemptID {
+                transientDisconnectLoggedForAttemptID = attemptID
+                SharedLogger.shared.logRaw(
+                    "VPN_START_TRANSIENT_DISCONNECTED",
+                    detail: "id=\(String(attemptID.prefix(8))) ne_status=\(connection.status.rawValue) action=wait_for_start_ack"
+                )
+            }
+            status = .connecting
+            statusMessage = "Connecting…"
+            _ = SharedSettingsStore.shared.publishVPNStatus(.connecting, attemptID: attemptID)
+            refreshStatistics()
             return
         }
 
@@ -567,5 +752,19 @@ final class VPNController: ObservableObject {
         }
         SharedSettingsStore.shared.vpnStatus = status
         refreshStatistics()
+    }
+}
+
+private enum VPNLifecycleError: LocalizedError {
+    case stopDidNotSettle
+    case startNotAcknowledged
+
+    var errorDescription: String? {
+        switch self {
+        case .stopDidNotSettle:
+            return "The previous VPN session did not finish stopping. Please try again."
+        case .startNotAcknowledged:
+            return "iOS did not acknowledge the VPN start request. Please try again."
+        }
     }
 }

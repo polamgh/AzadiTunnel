@@ -1,4 +1,59 @@
 import Foundation
+import Network
+
+/// Accepts only globally routable IPv4/IPv6 literals returned by a public-IP service.
+/// This prevents captive-portal text or a private/loopback address from marking a
+/// tunnel as ready.
+enum PublicIPAddress {
+    static func normalized(_ raw: String) -> String? {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+
+        if let address = IPv4Address(value) {
+            let bytes = [UInt8](address.rawValue)
+            guard isGloballyRoutableIPv4(bytes) else { return nil }
+            return bytes.map(String.init).joined(separator: ".")
+        }
+
+        if let address = IPv6Address(value) {
+            let bytes = [UInt8](address.rawValue)
+            guard isGloballyRoutableIPv6(bytes) else { return nil }
+            return value
+        }
+
+        return nil
+    }
+
+    private static func isGloballyRoutableIPv4(_ bytes: [UInt8]) -> Bool {
+        guard bytes.count == 4 else { return false }
+        let a = bytes[0]
+        let b = bytes[1]
+        let c = bytes[2]
+
+        if a == 0 || a == 10 || a == 127 || a >= 224 { return false }
+        if a == 100, (64...127).contains(b) { return false }
+        if a == 169, b == 254 { return false }
+        if a == 172, (16...31).contains(b) { return false }
+        if a == 192, b == 168 { return false }
+        if a == 192, b == 0, c == 0 { return false }
+        if a == 192, b == 0, c == 2 { return false }
+        if a == 198, b == 18 || b == 19 { return false }
+        if a == 198, b == 51, c == 100 { return false }
+        if a == 203, b == 0, c == 113 { return false }
+        return true
+    }
+
+    private static func isGloballyRoutableIPv6(_ bytes: [UInt8]) -> Bool {
+        guard bytes.count == 16 else { return false }
+        // Current globally routable unicast space is 2000::/3. This excludes
+        // loopback, link-local, unique-local, multicast and documentation space.
+        guard bytes[0] & 0xE0 == 0x20 else { return false }
+        if bytes[0] == 0x20, bytes[1] == 0x01, bytes[2] == 0x0D, bytes[3] == 0xB8 {
+            return false
+        }
+        return true
+    }
+}
 
 /// Live/session traffic counters shared between extension and app (no secrets).
 struct TunnelStatistics: Codable, Equatable {
@@ -74,6 +129,7 @@ enum TunnelStatisticsStore {
         s.connectedCity = ""
         s.connectedCountry = ""
         s.connectedTunnelProtocol = ""
+        s.lastPublicIP = ""
         clearConduitStatus(on: &s)
         save(s)
     }

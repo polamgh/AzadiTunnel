@@ -16,6 +16,10 @@ enum AppGroupConstants {
     static let recoveryTrialSettingsKey = "recovery_trial_settings_json"
     static let sharedLogsKey = "shared_logs"
     static let vpnStatusKey = "vpn_status"
+    /// Attempt token passed from the app to the packet extension. Status writes
+    /// from an older provider instance are ignored once a newer attempt begins.
+    static let vpnAttemptIDKey = "vpn_attempt_id"
+    static let vpnAttemptOptionKey = "AzadiTunnelAttemptID"
     static let testModeKey = "ui_test_mode"
     static let lastInternetTestOKKey = "last_internet_test_ok"
     static let psiphonTunnelEstablishedKey = "psiphon_tunnel_established"

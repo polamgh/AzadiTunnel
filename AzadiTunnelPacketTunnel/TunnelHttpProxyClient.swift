@@ -109,12 +109,42 @@ enum TunnelHttpProxyClient {
                 }
             }
             if !chunk.isEmpty { buffer.append(chunk) }
-            if buffer.range(of: Data("\r\n\r\n".utf8)) != nil { break }
-            if done { break }
+            if done || responseIsComplete(buffer) { break }
             if chunk.isEmpty {
+                if buffer.range(of: Data("\r\n\r\n".utf8)) != nil { break }
                 try await Task.sleep(nanoseconds: 50_000_000)
             }
         }
         return buffer
+    }
+
+    private static func responseIsComplete(_ response: Data) -> Bool {
+        guard let headerEnd = response.range(of: Data("\r\n\r\n".utf8)) else {
+            return false
+        }
+        let headerData = response.subdata(in: 0..<headerEnd.lowerBound)
+        guard let headers = String(data: headerData, encoding: .utf8) else { return false }
+        let lower = headers.lowercased()
+        let body = response.subdata(in: headerEnd.upperBound..<response.count)
+
+        if headers.split(separator: "\r\n").first?.contains(" 204 ") == true {
+            return true
+        }
+        if let contentLength = contentLength(from: lower) {
+            return body.count >= contentLength
+        }
+        if lower.contains("transfer-encoding: chunked") {
+            return body.range(of: Data("\r\n0\r\n\r\n".utf8)) != nil
+                || body == Data("0\r\n\r\n".utf8)
+        }
+        return false
+    }
+
+    private static func contentLength(from lowercasedHeaders: String) -> Int? {
+        for line in lowercasedHeaders.components(separatedBy: "\r\n") {
+            guard line.hasPrefix("content-length:") else { continue }
+            return Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces))
+        }
+        return nil
     }
 }

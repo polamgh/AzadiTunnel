@@ -7,6 +7,7 @@ final class RecoveryTimingTests: XCTestCase {
         var value: TimeInterval = 0
         var sleeps: [TimeInterval] = []
         var throwOnSleepNumber: Int?
+        var onSleep: ((Int) -> Void)?
 
         lazy var clock = RecoveryClock(
             now: { [weak self] in self?.value ?? 0 },
@@ -17,6 +18,7 @@ final class RecoveryTimingTests: XCTestCase {
                     throw CancellationError()
                 }
                 self.value += seconds
+                self.onSleep?(self.sleeps.count)
             }
         )
     }
@@ -80,7 +82,7 @@ final class RecoveryTimingTests: XCTestCase {
         }
         XCTAssertEqual(clock.value, 75, accuracy: 0.0001)
         XCTAssertTrue(timeouts.allSatisfy { $0 <= RecoveryTimingDefaults.perAttemptBudget })
-        XCTAssertEqual(timeouts, [25, 25, 23.5])
+        XCTAssertEqual(timeouts, [30, 30, 9])
         XCTAssertEqual(connects, 3)
     }
 
@@ -169,7 +171,7 @@ final class RecoveryTimingTests: XCTestCase {
         } else {
             XCTFail("expected timeout exhaustion")
         }
-        XCTAssertEqual(clock.value, 26, accuracy: 0.0001)
+        XCTAssertEqual(clock.value, 34, accuracy: 0.0001)
         XCTAssertEqual(persisted, 0)
     }
 
@@ -215,7 +217,7 @@ final class RecoveryTimingTests: XCTestCase {
         XCTAssertEqual(connected, 2)
         XCTAssertEqual(restored, 1)
         XCTAssertEqual(persisted, [second])
-        XCTAssertEqual(clock.value, 26, accuracy: 0.0001)
+        XCTAssertEqual(clock.value, 34, accuracy: 0.0001)
     }
 
     func testRecoverySessionGatePreventsOverlappingRuns() {
@@ -466,5 +468,58 @@ final class RecoveryTimingTests: XCTestCase {
         store.clearRecoveryTrialSettings()
         XCTAssertNil(store.recoveryTrialSettings)
         XCTAssertEqual(store.appSettings, durable)
+    }
+
+    func testStaleExtensionStatusCannotOverwriteNewAttempt() {
+        let store = SharedSettingsStore.shared
+        let originalAttemptID = store.activeVPNAttemptID
+        let originalStatus = store.vpnStatus
+        let originalInternetTest = store.lastInternetTestOK
+        defer {
+            store.activeVPNAttemptID = originalAttemptID
+            store.vpnStatus = originalStatus
+            store.lastInternetTestOK = originalInternetTest
+        }
+
+        let oldAttemptID = UUID().uuidString
+        let newAttemptID = UUID().uuidString
+        store.beginVPNAttempt(newAttemptID)
+
+        XCTAssertFalse(store.publishVPNStatus(.disconnected, attemptID: oldAttemptID))
+        XCTAssertEqual(store.vpnStatus, .connecting)
+        XCTAssertTrue(store.publishVPNStatus(.connected, attemptID: newAttemptID))
+        XCTAssertEqual(store.vpnStatus, .connected)
+    }
+
+    func testConnectedTunnelWaitToleratesTransientStartupDisconnect() async {
+        let store = SharedSettingsStore.shared
+        let originalAttemptID = store.activeVPNAttemptID
+        let originalStatus = store.vpnStatus
+        let originalInternetTest = store.lastInternetTestOK
+        defer {
+            store.activeVPNAttemptID = originalAttemptID
+            store.vpnStatus = originalStatus
+            store.lastInternetTestOK = originalInternetTest
+        }
+
+        let clock = FakeClock()
+        store.beginVPNAttempt(UUID().uuidString)
+        store.vpnStatus = .disconnected
+        clock.onSleep = { sleepCount in
+            if sleepCount == 1 {
+                store.vpnStatus = .connecting
+            } else if sleepCount == 2 {
+                store.vpnStatus = .connected
+                store.lastInternetTestOK = true
+            }
+        }
+
+        let result = await InternetConnectivityTest.waitForConnectedTunnel(
+            timeoutSeconds: 5,
+            clock: clock.clock
+        )
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(clock.value, 2, accuracy: 0.0001)
     }
 }

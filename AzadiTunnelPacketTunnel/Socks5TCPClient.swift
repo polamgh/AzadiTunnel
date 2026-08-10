@@ -442,13 +442,44 @@ enum Socks5TCPClient {
                 maxLength: 4096,
                 timeout: min(8, max(0.05, deadline.remaining))
             )
-            if chunk.isEmpty { break }
+            if chunk.isEmpty {
+                if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                    return buffer.subdata(in: range.upperBound..<buffer.count)
+                }
+                break
+            }
             buffer.append(chunk)
-            if let range = buffer.range(of: Data("\r\n\r\n".utf8)) {
+            if let range = buffer.range(of: Data("\r\n\r\n".utf8)),
+               httpResponseIsComplete(buffer, headerEnd: range) {
                 return buffer.subdata(in: range.upperBound..<buffer.count)
             }
         }
         throw Socks5Error.httpNoHeaders
+    }
+
+    private static func httpResponseIsComplete(
+        _ response: Data,
+        headerEnd: Range<Data.Index>
+    ) -> Bool {
+        let headerData = response.subdata(in: 0..<headerEnd.lowerBound)
+        guard let headers = String(data: headerData, encoding: .utf8) else { return false }
+        let lower = headers.lowercased()
+        let body = response.subdata(in: headerEnd.upperBound..<response.count)
+
+        if headers.split(separator: "\r\n").first?.contains(" 204 ") == true {
+            return true
+        }
+        for line in lower.components(separatedBy: "\r\n") where line.hasPrefix("content-length:") {
+            guard let length = Int(
+                line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)
+            ) else { return false }
+            return body.count >= length
+        }
+        if lower.contains("transfer-encoding: chunked") {
+            return body.range(of: Data("\r\n0\r\n\r\n".utf8)) != nil
+                || body == Data("0\r\n\r\n".utf8)
+        }
+        return false
     }
 
     private final class ContinuationGate<Value>: @unchecked Sendable {

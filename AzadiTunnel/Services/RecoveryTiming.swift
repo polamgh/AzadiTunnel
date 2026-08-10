@@ -48,11 +48,18 @@ struct RecoveryBudget {
 }
 
 enum RecoveryTimingDefaults {
-    nonisolated static let overallBudget: TimeInterval = 75
-    nonisolated static let perAttemptBudget: TimeInterval = 25
-    nonisolated static let minimumAttemptBudget: TimeInterval = 20
-    nonisolated static let disconnectSettle: TimeInterval = 0.5
+    // Iranian mobile networks often need substantially longer for fronted TLS,
+    // tactics, and broker negotiation than an unrestricted network. Preserve
+    // enough time for all four serial transports without overlapping engines.
+    nonisolated static let overallBudget: TimeInterval = 180
+    nonisolated static let perAttemptBudget: TimeInterval = 40
+    nonisolated static let minimumAttemptBudget: TimeInterval = 30
+    nonisolated static let disconnectSettle: TimeInterval = 2.0
     nonisolated static let connectivityPoll: TimeInterval = 1
+    nonisolated static let networkExtensionStopTimeout: TimeInterval = 15
+    nonisolated static let networkExtensionStartAcknowledgement: TimeInterval = 10
+    nonisolated static let networkExtensionStartupStatusGrace: TimeInterval = 10
+    nonisolated static let slowConnectionHintDelay: TimeInterval = 20
     nonisolated static let maxRecoveryAttempts = 4
     nonisolated static let maxEgressCandidates = 2
 }

@@ -17,6 +17,9 @@ struct DashboardView: View {
     @State private var pingRefreshing = false
     @State private var pingRefreshInFlight = false
     @State private var showRegionPicker = false
+    @State private var selectedProtocol = SharedSettingsStore.shared.appSettings.protocolSelection
+    @State private var connectingStartedAt: TimeInterval?
+    @State private var showSlowConnectionHelp = false
 
     var body: some View {
         ZStack {
@@ -42,15 +45,19 @@ struct DashboardView: View {
                             showDisclosure = true
                             return
                         }
-                        Task {
-                            await vpn.prepareForUserToggle()
-                            if shouldDisconnectOnPowerTap {
+                        if shouldDisconnectOnPowerTap {
+                            Task {
+                                await vpn.prepareForUserToggle()
                                 await vpn.disconnect()
-                            } else {
+                            }
+                        } else {
+                            vpn.beginUserConnectFeedback()
+                            Task {
                                 await vpn.connect()
                             }
                         }
                     }
+                    if showSlowConnectionHelp { slowConnectionHelpCard }
                     if showConduitProgress { conduitProgressCard }
                     locationCard
                     statsSection
@@ -149,7 +156,9 @@ struct DashboardView: View {
             while !Task.isCancelled {
                 vpn.syncStatusFromSharedStore()
                 refreshConfigFlag()
+                refreshProtocolSelection()
                 updateDuration()
+                updateSlowConnectionHelp()
                 try? await TaskSleep.seconds(1)
             }
         }
@@ -548,6 +557,47 @@ struct DashboardView: View {
                     .frame(width: 36)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Text(L10n.t(.settingsProtocol))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                        Spacer()
+                        Menu {
+                            ForEach(AppSettings.ProtocolSelection.allCases) { protocolSelection in
+                                Button {
+                                    updateProtocol(protocolSelection)
+                                } label: {
+                                    HStack {
+                                        Text(SettingsLabels.protocolName(protocolSelection))
+                                        if selectedProtocol == protocolSelection {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                                .disabled(
+                                    protocolSelection == .conduit
+                                        && !SharedSettingsStore.shared.conduitConnectAllowed
+                                )
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(SettingsLabels.protocolName(selectedProtocol))
+                                    .font(.subheadline.weight(.semibold))
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.8)
+                                    .fixedSize(horizontal: true, vertical: false)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2.weight(.semibold))
+                                    .accessibilityHidden(true)
+                            }
+                            .foregroundStyle(AppTheme.iranGreen)
+                        }
+                        .accessibilityLabel(Text(L10n.t(.settingsProtocol)))
+                        .accessibilityValue(Text(SettingsLabels.protocolName(selectedProtocol)))
+                        .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
+                        .accessibilityIdentifier("dashboardProtocolMenu")
+                    }
+                    Divider().overlay(AppTheme.cardStroke(for: colorScheme))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.t(.region))
                             .font(.caption.weight(.semibold))
@@ -593,6 +643,37 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private var slowConnectionHelpCard: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "hourglass.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(L10n.t(.slowConnectionTitle))
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(AppTheme.primaryText(for: colorScheme))
+                Text(L10n.t(.slowConnectionMessage))
+                    .font(.footnote)
+                    .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.11))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("slowConnectionHelp")
     }
 
     private var showConduitProgress: Bool {
@@ -837,6 +918,49 @@ struct DashboardView: View {
 
     private func refreshConfigFlag() {
         configReady = SharedSettingsStore.shared.hasActivePsiphonConfig
+    }
+
+    private func refreshProtocolSelection() {
+        let stored = SharedSettingsStore.shared.appSettings.protocolSelection
+        if selectedProtocol != stored {
+            selectedProtocol = stored
+        }
+    }
+
+    private func updateProtocol(_ protocolSelection: AppSettings.ProtocolSelection) {
+        guard protocolSelection != .conduit || SharedSettingsStore.shared.conduitConnectAllowed else {
+            return
+        }
+        selectedProtocol = protocolSelection
+        var settings = SharedSettingsStore.shared.appSettings
+        guard settings.protocolSelection != protocolSelection else { return }
+        settings.protocolSelection = protocolSelection
+        SharedSettingsStore.shared.updateAppSettings(
+            settings,
+            logKey: "dashboard_protocol_selection"
+        )
+    }
+
+    private func updateSlowConnectionHelp() {
+        guard vpn.status == .connecting else {
+            connectingStartedAt = nil
+            showSlowConnectionHelp = false
+            return
+        }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        if connectingStartedAt == nil {
+            connectingStartedAt = now
+        }
+        let shouldShow = now - (connectingStartedAt ?? now)
+            >= RecoveryTimingDefaults.slowConnectionHintDelay
+        if shouldShow, !showSlowConnectionHelp {
+            SharedLogger.shared.logRaw(
+                "SLOW_CONNECTION_HELP_SHOWN",
+                detail: "delay_s=\(Int(RecoveryTimingDefaults.slowConnectionHintDelay))"
+            )
+        }
+        showSlowConnectionHelp = shouldShow
     }
 
     private func updateDuration() {

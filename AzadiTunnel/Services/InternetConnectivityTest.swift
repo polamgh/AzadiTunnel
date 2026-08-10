@@ -37,12 +37,29 @@ enum InternetConnectivityTest {
         isCancellationRequested: () -> Bool = { false }
     ) async -> Bool {
         let (activeClock, deadline) = deadline(timeoutSeconds: timeoutSeconds, budget: budget, clock: clock)
+        let startupGraceDeadline = min(
+            deadline,
+            activeClock.now() + RecoveryTimingDefaults.networkExtensionStartupStatusGrace
+        )
+        var loggedStartupGrace = false
         while !Task.isCancelled, !isCancellationRequested() {
             guard activeClock.now() < deadline else { break }
 
             switch SharedSettingsStore.shared.vpnStatus {
             case .disconnected, .disconnecting, .error:
-                return false
+                let hasLiveStartAttempt = SharedSettingsStore.shared.activeVPNAttemptID != nil
+                guard hasLiveStartAttempt,
+                      activeClock.now() < startupGraceDeadline,
+                      SharedSettingsStore.shared.vpnStatus != .error else {
+                    return false
+                }
+                if !loggedStartupGrace {
+                    loggedStartupGrace = true
+                    SharedLogger.shared.logRaw(
+                        "VPN_START_STATUS_GRACE",
+                        detail: "status=\(SharedSettingsStore.shared.vpnStatus.rawValue) grace_s=\(Int(RecoveryTimingDefaults.networkExtensionStartupStatusGrace))"
+                    )
+                }
             case .connecting, .connected:
                 break
             }

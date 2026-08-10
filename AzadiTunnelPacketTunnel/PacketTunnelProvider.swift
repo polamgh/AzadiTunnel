@@ -6,6 +6,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var pendingStartCompletion: ((Error?) -> Void)?
     private var startupTask: Task<Void, Never>?
     private var stopRequested = false
+    private var tunnelAttemptID: String?
     private var engine: PsiphonTunnelEngine?
     private var packetBridge: PsiphonPacketTunnelFlowBridge?
     private var statsTimer: Task<Void, Never>?
@@ -19,9 +20,15 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private var endpointUpdatesActive = false
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
-        guard registerStartCompletion(completionHandler) else { return }
+        let attemptID = Self.attemptID(from: options)
+            ?? SharedSettingsStore.shared.activeVPNAttemptID
+        guard registerStartCompletion(completionHandler, attemptID: attemptID) else { return }
 
         SharedLogger.shared.log(.extensionBoot)
+        SharedLogger.shared.logRaw(
+            "EXTENSION_ATTEMPT_STARTED",
+            detail: "id=\(attemptID.map { String($0.prefix(8)) } ?? "none")"
+        )
         PsiphonInproxyBuildInfo.logFrameworkProbe()
         SharedLogger.shared.log(.extensionStartEntered)
 
@@ -251,23 +258,33 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     )
                 }
 
+                self.startStatsSampler()
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                try Task.checkCancellation()
+
+                // Public IP is the readiness gate. Keep iOS and the app in
+                // `connecting` until traffic has crossed the selected tunnel
+                // and a globally routable egress address has been returned.
+                let publicIP = await TunnelPublicIPService.fetch(endpoints: endpoints)
+                try Task.checkCancellation()
+                guard let publicIP = PublicIPAddress.normalized(publicIP) else {
+                    throw PsiphonTunnelCoreError.startFailed("public_ip_unavailable")
+                }
+                TunnelStatisticsStore.setPublicIP(publicIP)
+                SharedSettingsStore.shared.lastInternetTestOK = true
+                SharedLogger.shared.log(
+                    .internetTestPassed,
+                    detail: "via=extension_public_ip_probe"
+                )
                 TunnelStatisticsStore.markConnected(
                     region: region.isEmpty ? "Any" : region,
                     proxyOnly: proxyOnly
                 )
-                self.startStatsSampler()
-                try await Task.sleep(nanoseconds: 1_000_000_000)
-                try Task.checkCancellation()
-                if endpoints.hasSocks || endpoints.hasHttp {
-                    self.startConnectivityProbe(endpoints: endpoints)
-                } else {
-                    SharedLogger.shared.logRaw(
-                        "TUNNEL_CONNECTIVITY_PROBE_SKIPPED",
-                        detail: "reason=no_local_proxy native_packet_mode=true"
-                    )
-                }
 
-                SharedSettingsStore.shared.vpnStatus = .connected
+                _ = SharedSettingsStore.shared.publishVPNStatus(
+                    .connected,
+                    attemptID: attemptID
+                )
                 SharedLogger.shared.log(.tunnelConnected)
 
                 if endpoints.hasSocks {
@@ -276,20 +293,11 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
 
                 self.activateEndpointUpdates(for: psiphonEngine)
 
-                if proxyOnly {
-                    Task {
-                        let ip = await ProxyOnlyPublicIPService.fetch(endpoints: endpoints)
-                        if !ip.isEmpty {
-                            TunnelStatisticsStore.setPublicIP(ip)
-                        }
-                    }
-                }
-
                 self.completeStart(nil)
             } catch {
                 SharedLogger.shared.log(.psiphonConnectFailed, detail: "reason=\(error.localizedDescription)")
                 SharedLogger.shared.log(.tunnelStartFailed, detail: "reason=\(error.localizedDescription)")
-                await self.cleanup()
+                await self.cleanup(attemptID: attemptID)
                 self.completeStart(error)
             }
         }
@@ -310,20 +318,37 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         stopLANProxy(reason: .vpnDisconnected)
         stopPacketForwarding()
         TunnelStatisticsStore.markDisconnected()
-        SharedSettingsStore.shared.vpnStatus = .disconnected
-        SharedSettingsStore.shared.clearRecoveryTrialSettings()
+        let attemptID = currentTunnelAttemptID()
+        _ = SharedSettingsStore.shared.publishVPNStatus(
+            .disconnected,
+            attemptID: attemptID
+        )
+        // When the fallback chain is actively running, the chain controller
+        // owns the recovery trial lifecycle. Clearing the overlay here would
+        // wipe the next step's settings before the runner can apply them.
+        if !ConnectionDiagnosticsStore.loadFallback().isActive {
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
+        }
         SharedLogger.shared.log(.tunnelStopCleanup)
-        completionHandler()
 
         let engineToStop = detachEngineAndStopEndpointUpdates()
-        guard let engineToStop else { return }
+        guard let engineToStop else {
+            clearTunnelAttemptID(ifMatching: attemptID)
+            completionHandler()
+            return
+        }
         Task {
             await engineToStop.stopWithTimeout(seconds: 10)
             SharedLogger.shared.log(.psiphonStopped)
+            self.clearTunnelAttemptID(ifMatching: attemptID)
+            completionHandler()
         }
     }
 
-    private func registerStartCompletion(_ completion: @escaping (Error?) -> Void) -> Bool {
+    private func registerStartCompletion(
+        _ completion: @escaping (Error?) -> Void,
+        attemptID: String?
+    ) -> Bool {
         lifecycleLock.lock()
         guard pendingStartCompletion == nil else {
             lifecycleLock.unlock()
@@ -331,6 +356,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             return false
         }
         stopRequested = false
+        tunnelAttemptID = attemptID
         pendingStartCompletion = completion
         lifecycleLock.unlock()
         return true
@@ -359,6 +385,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         lifecycleLock.unlock()
         task?.cancel()
         completeStart(Self.lifecycleError(code: 11, reason: "tunnel_start_cancelled"))
+    }
+
+    private func currentTunnelAttemptID() -> String? {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return tunnelAttemptID
+    }
+
+    private func clearTunnelAttemptID(ifMatching attemptID: String?) {
+        lifecycleLock.lock()
+        if tunnelAttemptID == attemptID {
+            tunnelAttemptID = nil
+        }
+        lifecycleLock.unlock()
+    }
+
+    private static func attemptID(from options: [String: NSObject]?) -> String? {
+        guard let value = options?[AppGroupConstants.vpnAttemptOptionKey] as? NSString else {
+            return nil
+        }
+        let attemptID = value as String
+        return attemptID.isEmpty ? nil : attemptID
     }
 
     private func handlePacketBridgeFailure(_ error: NSError) {
@@ -566,13 +614,20 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    private func cleanup() async {
+    private func cleanup(attemptID: String?) async {
         stopPacketForwarding()
         if let engine = detachEngineAndStopEndpointUpdates() {
             await engine.stopWithTimeout(seconds: 10)
         }
         TunnelStatisticsStore.markDisconnected()
-        SharedSettingsStore.shared.clearRecoveryTrialSettings()
+        _ = SharedSettingsStore.shared.publishVPNStatus(
+            .disconnected,
+            attemptID: attemptID
+        )
+        clearTunnelAttemptID(ifMatching: attemptID)
+        if !ConnectionDiagnosticsStore.loadFallback().isActive {
+            SharedSettingsStore.shared.clearRecoveryTrialSettings()
+        }
     }
 
     private func psiphonDataDirectory() throws -> URL {
@@ -639,7 +694,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     completionHandler?(nil)
                     return
                 }
-                let ip = await ProxyOnlyPublicIPService.fetch(endpoints: endpoints)
+                let ip = await TunnelPublicIPService.fetch(endpoints: endpoints)
                 if !ip.isEmpty {
                     TunnelStatisticsStore.setPublicIP(ip)
                 }

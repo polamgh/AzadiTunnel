@@ -168,6 +168,66 @@ final class SharedSettingsStore {
         }
     }
 
+    var activeVPNAttemptID: String? {
+        get {
+            guard let value = defaults?.string(forKey: AppGroupConstants.vpnAttemptIDKey),
+                  !value.isEmpty else {
+                return nil
+            }
+            return value
+        }
+        set {
+            if let newValue, !newValue.isEmpty {
+                defaults?.set(newValue, forKey: AppGroupConstants.vpnAttemptIDKey)
+            } else {
+                defaults?.removeObject(forKey: AppGroupConstants.vpnAttemptIDKey)
+            }
+        }
+    }
+
+    /// Starts a new app-owned NetworkExtension attempt. The token prevents a
+    /// late stop callback from the previous extension instance from publishing
+    /// `disconnected` over the new attempt's `connecting` state.
+    func beginVPNAttempt(_ attemptID: String) {
+        activeVPNAttemptID = attemptID
+        lastInternetTestOK = false
+        vpnStatus = .connecting
+        SharedLogger.shared.logRaw(
+            "VPN_ATTEMPT_STARTED",
+            detail: "id=\(Self.logToken(attemptID))"
+        )
+    }
+
+    /// Publishes extension state only while the extension still owns the active
+    /// attempt. Returns false for a stale provider callback.
+    @discardableResult
+    func publishVPNStatus(_ status: VPNStatusDisplay, attemptID: String?) -> Bool {
+        guard let attemptID, !attemptID.isEmpty else {
+            vpnStatus = status
+            return true
+        }
+        guard activeVPNAttemptID == attemptID else {
+            SharedLogger.shared.logRaw(
+                "VPN_STATUS_STALE_IGNORED",
+                detail: "status=\(status.rawValue) id=\(Self.logToken(attemptID))"
+            )
+            return false
+        }
+        vpnStatus = status
+        return true
+    }
+
+    func endVPNAttempt(ifMatching attemptID: String? = nil) {
+        if let attemptID, activeVPNAttemptID != attemptID {
+            return
+        }
+        activeVPNAttemptID = nil
+    }
+
+    private static func logToken(_ token: String) -> String {
+        String(token.prefix(8))
+    }
+
     var isUITestMode: Bool {
         get { defaults?.bool(forKey: AppGroupConstants.testModeKey) ?? false }
         set { defaults?.set(newValue, forKey: AppGroupConstants.testModeKey) }

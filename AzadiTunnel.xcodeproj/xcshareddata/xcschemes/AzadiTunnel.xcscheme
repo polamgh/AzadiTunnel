@@ -52,16 +52,16 @@
                ReferencedContainer = "container:AzadiTunnel.xcodeproj">
             </BuildableReference>
          </TestableReference>
-      <TestableReference
-         skipped = "NO">
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "A10000052FCFF95000D0A30A"
-            BuildableName = "AzadiTunnelTests.xctest"
-            BlueprintName = "AzadiTunnelTests"
-            ReferencedContainer = "container:AzadiTunnel.xcodeproj">
-         </BuildableReference>
-      </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "A10000052FCFF95000D0A30A"
+               BuildableName = "AzadiTunnelTests.xctest"
+               BlueprintName = "AzadiTunnelTests"
+               ReferencedContainer = "container:AzadiTunnel.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <StoreKitConfigurationFileReference
          identifier = "Configuration.storekit"

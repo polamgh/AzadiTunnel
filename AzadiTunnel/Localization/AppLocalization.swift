@@ -81,6 +81,8 @@ final class AppLanguageController: ObservableObject {
         case region
         case regionAny
         case publicIP
+        case slowConnectionTitle
+        case slowConnectionMessage
         case settingsTitle
         case language
         case languageSystem

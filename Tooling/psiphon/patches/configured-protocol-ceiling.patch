@@ -1,0 +1,123 @@
+diff --git a/psiphon/controller.go b/psiphon/controller.go
+--- a/psiphon/controller.go
++++ b/psiphon/controller.go
+@@ -2367,6 +2367,34 @@ type protocolSelectionConstraints struct {
+ 	inproxyClientDialRateLimiter              *rate.Limiter
+ }
+ 
++// applyConfiguredTunnelProtocolCeiling keeps an explicit client transport
++// selection authoritative after tactics have been applied. Tactics still
++// provide current servers, fronting data, and all unrelated parameters, but a
++// tactics LimitTunnelProtocols value cannot switch a fixed CDN/direct/conduit
++// attempt to a protocol outside the client configuration.
++func applyConfiguredTunnelProtocolCeiling(
++	tacticsLimit protocol.TunnelProtocols,
++	configuredLimit protocol.TunnelProtocols) protocol.TunnelProtocols {
++
++	if len(configuredLimit) == 0 {
++		return tacticsLimit
++	}
++
++	constrained := make(protocol.TunnelProtocols, 0, len(tacticsLimit))
++	for _, tunnelProtocol := range tacticsLimit {
++		if common.Contains(configuredLimit, tunnelProtocol) {
++			constrained = append(constrained, tunnelProtocol)
++		}
++	}
++	if len(constrained) > 0 {
++		return constrained
++	}
++
++	// An empty or disjoint tactics limit must not disable the user's fixed
++	// transport attempt. Fall back to the configured ceiling itself.
++	return append(protocol.TunnelProtocols(nil), configuredLimit...)
++}
++
+ func (p *protocolSelectionConstraints) hasInitialProtocols() bool {
+ 	return len(p.initialLimitTunnelProtocols) > 0 && p.initialLimitTunnelProtocolsCandidateCount > 0
+ }
+@@ -2798,13 +2826,21 @@ func (controller *Controller) launchEstablishing() {
+ 	// point, allowing concurrent reads by establishment workers.
+ 
+ 	p := controller.config.GetParameters().Get()
++	configuredLimitTunnelProtocols :=
++		protocol.TunnelProtocols(controller.config.LimitTunnelProtocols)
++	initialLimitTunnelProtocols := applyConfiguredTunnelProtocolCeiling(
++		p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
++		configuredLimitTunnelProtocols)
++	limitTunnelProtocols := applyConfiguredTunnelProtocolCeiling(
++		p.TunnelProtocols(parameters.LimitTunnelProtocols),
++		configuredLimitTunnelProtocols)
+ 
+ 	controller.protocolSelectionConstraints = &protocolSelectionConstraints{
+ 		config: controller.config,
+ 
+-		initialLimitTunnelProtocols:               p.TunnelProtocols(parameters.InitialLimitTunnelProtocols),
++		initialLimitTunnelProtocols:               initialLimitTunnelProtocols,
+ 		initialLimitTunnelProtocolsCandidateCount: p.Int(parameters.InitialLimitTunnelProtocolsCandidateCount),
+-		limitTunnelProtocols:                      p.TunnelProtocols(parameters.LimitTunnelProtocols),
++		limitTunnelProtocols:                      limitTunnelProtocols,
+ 		limitTunnelDialPortNumbers: protocol.TunnelProtocolPortLists(
+ 			p.TunnelProtocolPortLists(parameters.LimitTunnelDialPortNumbers)),
+ 
+diff --git a/psiphon/limitProtocols_test.go b/psiphon/limitProtocols_test.go
+--- a/psiphon/limitProtocols_test.go
++++ b/psiphon/limitProtocols_test.go
+@@ -24,6 +24,7 @@ import (
+ 	"fmt"
+ 	"io/ioutil"
+ 	"os"
++	"reflect"
+ 	"sync"
+ 	"testing"
+ 	"time"
+@@ -34,6 +35,49 @@ import (
+ 	"github.com/Psiphon-Labs/psiphon-tunnel-core/psiphon/server"
+ )
+ 
++func TestApplyConfiguredTunnelProtocolCeiling(t *testing.T) {
++	tests := []struct {
++		name       string
++		tactics    protocol.TunnelProtocols
++		configured protocol.TunnelProtocols
++		expected   protocol.TunnelProtocols
++	}{
++		{
++			name:       "no configured ceiling preserves tactics",
++			tactics:    protocol.TunnelProtocols{"OSSH", "INPROXY-WEBRTC-OSSH"},
++			configured: nil,
++			expected:   protocol.TunnelProtocols{"OSSH", "INPROXY-WEBRTC-OSSH"},
++		},
++		{
++			name:       "intersection preserves tactics order",
++			tactics:    protocol.TunnelProtocols{"INPROXY-WEBRTC-OSSH", "FRONTED-MEEK-CDN-OSSH"},
++			configured: protocol.TunnelProtocols{"FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-QUIC-OSSH"},
++			expected:   protocol.TunnelProtocols{"FRONTED-MEEK-CDN-OSSH"},
++		},
++		{
++			name:       "disjoint tactics cannot replace fixed transport",
++			tactics:    protocol.TunnelProtocols{"INPROXY-WEBRTC-OSSH"},
++			configured: protocol.TunnelProtocols{"FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-QUIC-OSSH"},
++			expected:   protocol.TunnelProtocols{"FRONTED-MEEK-CDN-OSSH", "FRONTED-MEEK-CDN-QUIC-OSSH"},
++		},
++		{
++			name:       "empty tactics uses fixed transport",
++			tactics:    nil,
++			configured: protocol.TunnelProtocols{"TLS-OSSH"},
++			expected:   protocol.TunnelProtocols{"TLS-OSSH"},
++		},
++	}
++
++	for _, test := range tests {
++		t.Run(test.name, func(t *testing.T) {
++			actual := applyConfiguredTunnelProtocolCeiling(test.tactics, test.configured)
++			if !reflect.DeepEqual(actual, test.expected) {
++				t.Fatalf("unexpected protocols: got %v, expected %v", actual, test.expected)
++			}
++		})
++	}
++}
++
+ func TestLimitTunnelProtocols(t *testing.T) {
+ 
+ 	testDataDirName, err := ioutil.TempDir("", "psiphon-limit-tunnel-protocols-test")

@@ -6,6 +6,9 @@ enum PublicIPFetcher {
     /// Only after internet test passes — avoids noisy timeouts while DNS is still settling.
     static func fetchIfNeeded() async {
         guard SharedSettingsStore.shared.lastInternetTestOK else { return }
+        if PublicIPAddress.normalized(TunnelStatisticsStore.load().lastPublicIP) != nil {
+            return
+        }
         if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {
             await fetchProxyOnly()
         } else {
@@ -88,6 +91,6 @@ enum PublicIPFetcher {
     private static func parseIP(from data: Data) -> String? {
         let text = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return text.isEmpty ? nil : text
+        return PublicIPAddress.normalized(text)
     }
 }

@@ -125,6 +125,7 @@ struct IranFlagStripe: View {
         }
         .frame(height: 4)
         .clipShape(Capsule())
+        .accessibilityHidden(true)
     }
 }
 

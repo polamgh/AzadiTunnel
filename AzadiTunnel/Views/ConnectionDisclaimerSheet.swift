@@ -54,5 +54,6 @@ struct ConnectionDisclaimerSheet: View {
                 .font(.subheadline)
                 .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
         }
+        .accessibilityElement(children: .combine)
     }
 }

@@ -45,6 +45,7 @@ struct ShareProxyView: View {
             .navigationTitle(L10n.t(.shareProxyNavTitle))
             .navigationBarTitleDisplayMode(.inline)
             .id(lang.revision)
+            .accessibilityIdentifier("shareProxyScreen")
             .onAppear {
                 SharedLogger.shared.log(.lanProxySettingOpened)
                 refreshAll()
@@ -95,6 +96,9 @@ struct ShareProxyView: View {
                 Text(statusText)
                     .foregroundStyle(statusColor)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.status)))
+            .accessibilityValue(Text(statusText))
             HStack {
                 Text(L10n.t(.shareProxyWifiIP))
                 Spacer()
@@ -102,6 +106,9 @@ struct ShareProxyView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("wifiIPValue")
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.shareProxyWifiIP)))
+            .accessibilityValue(Text(displayHostOrPlaceholder))
             if wifiIP == nil {
                 Text(L10n.t(.shareProxyNoWifiHint))
                     .font(.footnote)
@@ -136,6 +143,7 @@ struct ShareProxyView: View {
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 110)
+                    .accessibilityLabel(Text(L10n.t(.shareProxyHttpPort)))
                     .accessibilityIdentifier("lanHttpPortField")
             }
             HStack {
@@ -145,6 +153,7 @@ struct ShareProxyView: View {
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 110)
+                    .accessibilityLabel(Text(L10n.t(.shareProxySocksPort)))
                     .accessibilityIdentifier("lanSocksPortField")
             }
             if let portValidationError {
@@ -155,6 +164,7 @@ struct ShareProxyView: View {
             Button(L10n.t(.shareProxySavePorts)) {
                 Task { await savePorts() }
             }
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             .accessibilityIdentifier("savePortsButton")
             Text(L10n.t(.shareProxyPortHint))
                 .font(.footnote)
@@ -179,6 +189,7 @@ struct ShareProxyView: View {
                     .autocorrectionDisabled()
                     .onChange(of: settings.lanProxyUsername) { _ in persist("lan_proxy_username") }
                 SecureField(L10n.t(.shareProxyPassword), text: $settings.lanProxyPassword)
+                    .accessibilityLabel(Text(L10n.t(.shareProxyPassword)))
                     .onChange(of: settings.lanProxyPassword) { _ in persist("lan_proxy_password") }
             }
             Text(L10n.t(.shareProxyNoAuthWarning))
@@ -243,8 +254,10 @@ struct ShareProxyView: View {
             }
             .buttonStyle(.borderless)
             .disabled(!isAvailable)
-            .accessibilityLabel(L10n.t(.copy))
+            .accessibilityLabel(Text("\(L10n.t(.copy)) \(title)"))
+            .accessibilityHint(Text(L10n.t(.accessibilityCopy)))
         }
+        .accessibilityElement(children: .contain)
     }
 
     private var displayHost: String? {

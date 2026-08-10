@@ -35,7 +35,9 @@ struct SettingsView: View {
 
                 if let importError {
                     Section {
-                        Text(importError).foregroundStyle(.red)
+                        Text(importError)
+                            .foregroundStyle(.red)
+                            .accessibilityAddTraits(.isStaticText)
                     }
                 }
             }
@@ -82,6 +84,9 @@ struct SettingsView: View {
                 Text(usesBundled ? L10n.t(.settingsBundled) : L10n.t(.settingsCustom))
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.settingsConfigSource)))
+            .accessibilityValue(Text(usesBundled ? L10n.t(.settingsBundled) : L10n.t(.settingsCustom)))
             if entryLineCount > 0 {
                 Text("\(L10n.t(.settingsServerEntries)): \(entryLineCount)")
                     .font(.footnote)
@@ -101,6 +106,7 @@ struct SettingsView: View {
             .onChange(of: settings.egressRegion) { _ in
                 persist("egress_region")
             }
+            .accessibilityHint(Text(L10n.t(.settingsRegionHint)))
             Text(L10n.t(.settingsRegionHint))
                 .font(.footnote)
                 .foregroundStyle(.secondary)
@@ -122,6 +128,7 @@ struct SettingsView: View {
                 }
                 persist("protocol_selection")
             }
+            .accessibilityHint(Text(protocolHelpText))
             if !conduitConnectAllowed {
                 Text(PsiphonDistributorKeys.conduitBlockedStatusLine)
                     .font(.footnote)
@@ -196,11 +203,13 @@ struct SettingsView: View {
                 .lineLimit(8)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityLabel(Text(L10n.t(.settingsCDNEdgeIPs)))
                 .onChange(of: settings.cdnFrontingCustomIpList) { _ in persist("cdn_custom_ips") }
             TextField(L10n.t(.settingsCDNSNI), text: $settings.cdnFrontingCustomSni)
                 .lineLimit(6)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityLabel(Text(L10n.t(.settingsCDNSNI)))
                 .onChange(of: settings.cdnFrontingCustomSni) { _ in persist("cdn_custom_sni") }
             Text(cdnFrontingSummary)
                 .font(.caption)
@@ -216,13 +225,16 @@ struct SettingsView: View {
                 TextField(L10n.t(.settingsProxyHost), text: $settings.upstreamProxyHost)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .accessibilityLabel(Text(L10n.t(.settingsProxyHost)))
                     .onChange(of: settings.upstreamProxyHost) { _ in persist("upstream_proxy_host") }
                 Stepper("\(L10n.t(.settingsProxyPort)): \(settings.upstreamProxyPort)", value: $settings.upstreamProxyPort, in: 1...65535)
                     .onChange(of: settings.upstreamProxyPort) { _ in persist("upstream_proxy_port") }
                 Toggle(L10n.t(.settingsProxySystem), isOn: $settings.upstreamProxyUseSystem)
                     .onChange(of: settings.upstreamProxyUseSystem) { _ in persist("upstream_proxy_system") }
-                SecureField("Username (optional)", text: $settings.upstreamProxyUsername)
-                SecureField("Password (optional)", text: $settings.upstreamProxyPassword)
+                SecureField(L10n.t(.settingsProxyUsername), text: $settings.upstreamProxyUsername)
+                    .accessibilityLabel(Text(L10n.t(.settingsProxyUsername)))
+                SecureField(L10n.t(.settingsProxyPassword), text: $settings.upstreamProxyPassword)
+                    .accessibilityLabel(Text(L10n.t(.settingsProxyPassword)))
             }
         }
     }
@@ -258,6 +270,7 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
+                .accessibilityElement(children: .combine)
             }
             .accessibilityIdentifier("proxyOnlySettingsLink")
         }
@@ -281,6 +294,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
             .accessibilityIdentifier("shareProxyRow")
         }
@@ -297,6 +311,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
             .accessibilityIdentifier("bypassIranRow")
         }
@@ -320,6 +335,7 @@ struct SettingsView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+                .accessibilityElement(children: .combine)
             }
             .accessibilityIdentifier("secureDnsRow")
         }
@@ -367,6 +383,7 @@ struct SettingsView: View {
                 persist("language")
                 AppLanguageController.shared.reload()
             }
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
         }
     }
 
@@ -382,11 +399,13 @@ struct SettingsView: View {
                 presentToast(ok ? L10n.t(.settingsBundledInstallSuccess) : L10n.t(.settingsRetryBundledFailed))
             }
             .accessibilityIdentifier("retry_bundled_install_button")
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             Button(L10n.t(.settingsImportConfig)) {
                 SharedLogger.shared.log(.configImportOpened)
                 showImporter = true
             }
             .accessibilityIdentifier("import_config_button")
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             Button(L10n.t(.settingsExportDebug)) {
                 DebugReportExporter.presentShareSheet(from: nil)
                 presentToast(L10n.t(.settingsDebugReportReady))
@@ -406,6 +425,7 @@ struct SettingsView: View {
             } label: {
                 Text(L10n.t(.logsTitle))
             }
+            .accessibilityElement(children: .combine)
             .accessibilityIdentifier("logsSettingsLink")
         }
     }
@@ -425,6 +445,7 @@ struct SettingsView: View {
                     .accessibilityIdentifier("privacyNoticeLink")
             }
             NavigationLink(L10n.t(.settingsAbout)) { AboutView() }
+                .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
             NavigationLink {
                 SupportAzadiTunnelView()
             } label: {

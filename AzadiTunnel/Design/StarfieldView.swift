@@ -10,6 +10,7 @@ struct StarfieldView: View {
             }
         }
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func drawStars(context: inout GraphicsContext, size: CGSize, time: Double) {

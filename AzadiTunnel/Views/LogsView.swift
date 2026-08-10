@@ -12,6 +12,7 @@ struct LogsView: View {
             Text(line)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
+                .accessibilityElement(children: .combine)
                 .contextMenu {
                     Button {
                         UIPasteboard.general.string = line
@@ -44,6 +45,8 @@ struct LogsView: View {
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
+                .accessibilityLabel(Text(L10n.t(.logsTitle)))
+                .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
                 .accessibilityIdentifier("copy_logs_button")
             }
         }

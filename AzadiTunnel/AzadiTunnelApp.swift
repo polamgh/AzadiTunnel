@@ -9,6 +9,7 @@ struct AzadiTunnelApp: App {
     @State private var showLanguagePicker = !isUITest && !SharedSettingsStore.shared.appSettings.hasChosenLanguage
     @State private var showSplash = !isUITest && SharedSettingsStore.shared.appSettings.hasChosenLanguage
     @State private var showOnboarding = false
+    @StateObject private var languageController = AppLanguageController.shared
 
     init() {
         AppLocalizationUI.register()
@@ -118,6 +119,10 @@ struct AzadiTunnelApp: App {
                     .transition(.opacity)
                     .zIndex(1)
                 }
+            }
+            .background {
+                AccessibilityLanguageBridge(language: languageController.accessibilityLanguage)
+                    .frame(width: 0, height: 0)
             }
             .fullScreenCover(isPresented: $showLanguagePicker) {
                 LanguageSelectionView {

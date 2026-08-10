@@ -24,6 +24,8 @@ struct LegalOpenSourceView: View {
                         if let url = URL(string: component.sourceURL) {
                             Link(component.sourceURL, destination: url)
                                 .font(.caption2)
+                                .accessibilityLabel(Text("\(L10n.t(.accessibilityOpen)) \(component.name)"))
+                                .accessibilityHint(Text(component.sourceURL))
                         }
                     }
                     .padding(.vertical, 4)
@@ -73,6 +75,7 @@ struct FullLicenseNoticesView: View {
         }
         .navigationTitle(L10n.t(.viewFullLicenseNotices))
         .accessibilityIdentifier("fullLicenseNoticesScreen")
+        .accessibilityElement(children: .contain)
         .onAppear {
             SharedLogger.shared.logRaw("LICENSE_NOTICES_OPENED", detail: "source=legal_page")
         }
@@ -90,6 +93,7 @@ struct PrivacyNoticeView: View {
             }
             .font(.body)
             .padding()
+            .accessibilityElement(children: .combine)
         }
         .navigationTitle(L10n.t(.privacyNoticeTitle))
         .accessibilityIdentifier("privacyNoticeScreen")

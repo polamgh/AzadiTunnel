@@ -56,6 +56,7 @@ struct SupportAzadiTunnelView: View {
                 Image(systemName: "checkmark.seal.fill")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.iranGreen)
+                    .accessibilityHidden(true)
                 Text(L10n.t(.supportFreeBadge))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(AppTheme.primaryText(for: colorScheme))
@@ -70,6 +71,7 @@ struct SupportAzadiTunnelView: View {
                 Capsule(style: .continuous)
                     .stroke(AppTheme.iranGreen.opacity(0.35), lineWidth: 1)
             )
+            .accessibilityElement(children: .combine)
 
             if store.purchaseState != .notPurchased && store.purchaseState != .unknown {
                 statusPill
@@ -81,6 +83,7 @@ struct SupportAzadiTunnelView: View {
         HStack(spacing: 8) {
             Image(systemName: statusIcon)
                 .font(.caption.weight(.bold))
+                .accessibilityHidden(true)
             Text(store.purchaseState.localizedLabel)
                 .font(.caption.weight(.medium))
         }
@@ -91,6 +94,9 @@ struct SupportAzadiTunnelView: View {
             Capsule(style: .continuous)
                 .fill(statusTint.opacity(colorScheme == .dark ? 0.18 : 0.12))
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(L10n.t(.supportStatus)))
+        .accessibilityValue(Text(store.purchaseState.localizedLabel))
     }
 
     private var statusIcon: String {
@@ -115,6 +121,7 @@ struct SupportAzadiTunnelView: View {
         GlassCard {
             HStack(spacing: 14) {
                 ProgressView()
+                    .accessibilityLabel(Text(L10n.t(.accessibilityLoading)))
                 Text(L10n.t(.supportLoading))
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
@@ -130,6 +137,7 @@ struct SupportAzadiTunnelView: View {
                 Image(systemName: "heart.slash")
                     .font(.title2)
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    .accessibilityHidden(true)
                 Text(store.loadError ?? L10n.t(.supportUnavailable))
                     .font(.subheadline)
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
@@ -137,6 +145,7 @@ struct SupportAzadiTunnelView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
+            .accessibilityElement(children: .combine)
         }
     }
 
@@ -180,12 +189,15 @@ struct SupportAzadiTunnelView: View {
                 Link(destination: URL(string: "https://apps.apple.com/account/subscriptions")!) {
                     legalLinkRow(title: L10n.t(.supportManageSubscriptions), icon: "creditcard")
                 }
+                .accessibilityLabel(Text(L10n.t(.supportManageSubscriptions)))
+                .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
                 NavigationLink {
                     PrivacyNoticeView()
                 } label: {
                     legalLinkRow(title: L10n.t(.privacyNoticeTitle), icon: "hand.raised.fill")
                 }
+                .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
             }
         }
     }
@@ -200,6 +212,7 @@ struct SupportAzadiTunnelView: View {
                     .foregroundStyle(AppTheme.accent)
             }
             .frame(maxWidth: .infinity)
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
         }
         .padding(.top, 4)
     }
@@ -226,6 +239,7 @@ struct SupportAzadiTunnelView: View {
                         Image(systemName: style.icon)
                             .font(.body.weight(.semibold))
                             .foregroundStyle(.white)
+                            .accessibilityHidden(true)
                     }
 
                     VStack(alignment: .leading, spacing: 3) {
@@ -255,8 +269,12 @@ struct SupportAzadiTunnelView: View {
                 }
                 .padding(.vertical, 4)
                 .contentShape(Rectangle())
+                .accessibilityElement(children: .combine)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(product.displayName))
+            .accessibilityValue(Text("\(product.description) \(product.displayPrice)"))
+            .accessibilityHint(Text(L10n.t(.accessibilityPurchase)))
             .accessibilityIdentifier("iap_product_\(id)")
         }
     }
@@ -281,9 +299,10 @@ struct SupportAzadiTunnelView: View {
                                     )
                                 )
                                 .frame(width: 46, height: 46)
-                            Image(systemName: highlight ? "crown.fill" : "arrow.triangle.2.circlepath")
-                                .font(.body.weight(.semibold))
-                                .foregroundStyle(.white)
+                        Image(systemName: highlight ? "crown.fill" : "arrow.triangle.2.circlepath")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .accessibilityHidden(true)
                         }
 
                         VStack(alignment: .leading, spacing: 6) {
@@ -309,10 +328,15 @@ struct SupportAzadiTunnelView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
                             .padding(.top, 4)
+                            .accessibilityHidden(true)
                     }
                 }
+                .accessibilityElement(children: .combine)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(Text(product.displayName))
+            .accessibilityValue(Text("\(product.description) \(product.displayPrice)"))
+            .accessibilityHint(Text(L10n.t(.accessibilityPurchase)))
             .accessibilityIdentifier("iap_product_\(id)")
         }
     }
@@ -329,6 +353,7 @@ struct SupportAzadiTunnelView: View {
         Rectangle()
             .fill(AppTheme.cardStroke(for: colorScheme))
             .frame(height: 1)
+            .accessibilityHidden(true)
     }
 
     private func legalLinkRow(title: String, icon: String) -> some View {
@@ -337,6 +362,7 @@ struct SupportAzadiTunnelView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.accent)
                 .frame(width: 22)
+                .accessibilityHidden(true)
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(AppTheme.primaryText(for: colorScheme))
@@ -344,6 +370,7 @@ struct SupportAzadiTunnelView: View {
             Image(systemName: "chevron.right")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                .accessibilityHidden(true)
         }
     }
 }

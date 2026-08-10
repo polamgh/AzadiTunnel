@@ -30,7 +30,10 @@ struct SplashView: View {
                     .padding(.horizontal, 32)
                     .opacity(logoOpacity * 0.9)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("AzadiTunnel. \(L10n.t(.splashTagline))"))
         }
+        .accessibilityIdentifier("splashScreen")
         .onAppear {
             withAnimation(.easeOut(duration: 0.9)) {
                 logoScale = 1

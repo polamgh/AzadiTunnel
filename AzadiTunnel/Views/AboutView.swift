@@ -46,6 +46,7 @@ struct AboutView: View {
             .padding(.bottom, 32)
         }
         .background(AppTheme.backgroundGradient(for: colorScheme).ignoresSafeArea())
+        .navigationTitle(L10n.t(.aboutNavTitle))
         .navigationBarTitleDisplayMode(.inline)
         .accessibilityIdentifier("aboutAzadiTunnelScreen")
         .id(lang.revision)
@@ -111,6 +112,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
 
             Button {
                 openURL(AboutLinks.companyWebsite)
@@ -124,6 +126,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             Button {
                 openURL(AboutLinks.xProfile)
@@ -137,6 +140,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             Button {
                 openURL(AboutLinks.contactEmail)
@@ -150,6 +154,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             Button {
                 openURL(AboutLinks.psiphonWebsite)
@@ -163,6 +168,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             Button {
                 openURL(AboutLinks.psiphonGitHub)
@@ -176,6 +182,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             NavigationLink {
                 PrivacyNoticeView()
@@ -189,6 +196,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             NavigationLink {
                 LegalOpenSourceView()
@@ -202,6 +210,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
 
             NavigationLink {
                 SupportAzadiTunnelView()
@@ -215,6 +224,7 @@ struct AboutView: View {
                 )
             }
             .buttonStyle(.plain)
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
         }
     }
 
@@ -249,6 +259,9 @@ private struct AboutInfoRow: View {
                 .multilineTextAlignment(.trailing)
         }
         .font(.subheadline)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(value))
     }
 }
 
@@ -272,8 +285,9 @@ private struct AboutActionRow: View {
                 .frame(width: 36, height: 36)
                 .background(
                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill(iconColor)
+                .fill(iconColor)
                 )
+                .accessibilityHidden(true)
 
             Text(title)
                 .font(.body.weight(.medium))
@@ -284,6 +298,7 @@ private struct AboutActionRow: View {
             Image(systemName: trailing == .external ? "arrow.up.forward" : "chevron.right")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
@@ -291,6 +306,8 @@ private struct AboutActionRow: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(AboutActionRow.buttonFill(for: colorScheme))
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(title))
     }
 
     private static func buttonFill(for scheme: ColorScheme) -> Color {

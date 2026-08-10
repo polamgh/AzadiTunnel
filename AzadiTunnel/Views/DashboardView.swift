@@ -169,6 +169,8 @@ struct DashboardView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
                 }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text("AzadiTunnel"))
                 Spacer(minLength: 8)
                 NavigationLink {
                     SupportAzadiTunnelView()
@@ -214,39 +216,55 @@ struct DashboardView: View {
                     Text(localizedStatusMessage)
                         .font(.title2.weight(.bold))
                         .foregroundStyle(AppTheme.statusColor(for: vpn.status, scheme: colorScheme))
+                        .accessibilityLabel(Text(L10n.t(.status)))
+                        .accessibilityValue(Text(localizedStatusMessage))
                         .accessibilityIdentifier("statusLabel")
                     if let protocolLabel = connectedProtocolLabel {
                         HStack(spacing: 6) {
                             Image(systemName: "arrow.triangle.branch")
+                                .accessibilityHidden(true)
                                 .font(.caption.weight(.semibold))
                             Text(protocolLabel)
                                 .font(.subheadline.weight(.semibold))
                         }
                         .foregroundStyle(AppTheme.iranGreen)
+                        .accessibilityElement(children: .combine)
                         .accessibilityIdentifier("connectedProtocolLabel")
                     }
                     HStack(spacing: 10) {
                         HStack(spacing: 4) {
                             Image(systemName: "clock")
+                                .accessibilityHidden(true)
                                 .font(.caption2.weight(.semibold))
                             Text(durationText)
                                 .font(.system(.caption, design: .monospaced).weight(.medium))
                                 .lineLimit(1)
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text(L10n.t(.session)))
+                        .accessibilityValue(Text(durationText))
                         Text("·")
                             .font(.caption2)
                             .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                            .accessibilityHidden(true)
                         HStack(spacing: 4) {
                             Image(systemName: "dot.radiowaves.left.and.right")
+                                .accessibilityHidden(true)
                                 .font(.caption2.weight(.semibold))
                             Text(pingDisplayText)
                                 .font(.system(.caption, design: .monospaced).weight(.medium))
                                 .lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text(L10n.t(.vpnPing)))
+                        .accessibilityValue(Text(pingDisplayText))
+                        HStack(spacing: 4) {
                             Button {
                                 Task { await refreshPing() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
                                     .font(.caption2.weight(.semibold))
+                                    .accessibilityHidden(true)
                                     .rotationEffect(.degrees(pingRefreshing ? 360 : 0))
                                     .animation(
                                         pingRefreshing
@@ -258,6 +276,7 @@ struct DashboardView: View {
                             .buttonStyle(.plain)
                             .disabled(vpn.status != .connected || pingRefreshing)
                             .accessibilityLabel(L10n.t(.refreshPing))
+                            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
                             .accessibilityIdentifier("pingRefreshButton")
                         }
                     }
@@ -432,6 +451,7 @@ struct DashboardView: View {
             }
             .tint(AppTheme.iranGreen)
         }
+        .accessibilityIdentifier("diagnosticsCard")
     }
 
     private func diagnosticsSubsection(title: String, @ViewBuilder content: () -> some View) -> some View {
@@ -455,6 +475,9 @@ struct DashboardView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(value))
     }
 
     private func notifyCopiedToClipboard() {
@@ -512,6 +535,7 @@ struct DashboardView: View {
                 .font(.caption2)
                 .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
                 .padding(.horizontal, 4)
+                .accessibilityAddTraits(.isStaticText)
         }
     }
 
@@ -522,6 +546,7 @@ struct DashboardView: View {
                     .font(.title2)
                     .foregroundStyle(AppTheme.iranGreen)
                     .frame(width: 36)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(L10n.t(.region))
@@ -537,9 +562,13 @@ struct DashboardView: View {
                                 Image(systemName: "chevron.up.chevron.down")
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(AppTheme.iranGreen)
+                                    .accessibilityHidden(true)
                             }
                         }
                         .buttonStyle(.plain)
+                        .accessibilityLabel(Text(L10n.t(.changeRegion)))
+                        .accessibilityValue(Text(regionTitle))
+                        .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
                         .accessibilityIdentifier("dashboardRegionMenu")
                         if let subtitle = regionSubtitle {
                             Text(subtitle)
@@ -558,6 +587,9 @@ struct DashboardView: View {
                             .foregroundStyle(AppTheme.primaryText(for: colorScheme).opacity(0.9))
                             .accessibilityIdentifier("publicIPLabel")
                     }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(Text(L10n.t(.publicIP)))
+                    .accessibilityValue(Text(publicIPLabel))
                 }
             }
         }
@@ -576,6 +608,7 @@ struct DashboardView: View {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
                         .font(.title3.weight(.semibold))
                         .foregroundStyle(AppTheme.iranGreen)
+                        .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L10n.t(.conduitProgress))
                             .font(.subheadline.weight(.semibold))
@@ -584,11 +617,14 @@ struct DashboardView: View {
                             .font(.caption2)
                             .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
                     }
+                    .accessibilityElement(children: .combine)
                 }
                 Text(vpn.statistics.conduitStatusLine)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(AppTheme.iranGreen)
                     .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel(Text(L10n.t(.conduitProgress)))
+                    .accessibilityValue(Text(vpn.statistics.conduitStatusLine))
                     .accessibilityIdentifier("conduitStatusLine")
                 if !vpn.statistics.conduitStatusHistory.isEmpty {
                     Divider().overlay(AppTheme.cardStroke(for: colorScheme))
@@ -597,6 +633,7 @@ struct DashboardView: View {
                             HStack(alignment: .top, spacing: 6) {
                                 Text("·")
                                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                                    .accessibilityHidden(true)
                                 Text(line)
                                     .font(.caption)
                                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
@@ -605,6 +642,7 @@ struct DashboardView: View {
                         }
                     }
                     .accessibilityIdentifier("conduitStatusHistory")
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -625,6 +663,7 @@ struct DashboardView: View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
+                .accessibilityHidden(true)
             Text(L10n.t(.proxyOnlyWarningDashboard))
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(AppTheme.primaryText(for: colorScheme))
@@ -636,6 +675,7 @@ struct DashboardView: View {
                 .fill(Color.orange.opacity(colorScheme == .dark ? 0.18 : 0.12))
         )
         .accessibilityIdentifier("proxyOnlyWarningBanner")
+        .accessibilityElement(children: .combine)
     }
 
     private var proxyOnlyCard: some View {
@@ -644,6 +684,7 @@ struct DashboardView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "arrow.left.arrow.right.circle")
                         .foregroundStyle(.orange)
+                        .accessibilityHidden(true)
                     Text(L10n.t(.proxyOnlyModeProxyOnly))
                         .font(.subheadline.weight(.semibold))
                 }
@@ -704,11 +745,13 @@ struct DashboardView: View {
                 UIPasteboard.general.string = value
                 presentCopyToast(L10n.t(.copiedToClipboard))
             } label: {
-                Image(systemName: "doc.on.doc")
-                    .font(.caption)
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption)
+                        .accessibilityHidden(true)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(L10n.t(.copy))
+            .accessibilityLabel(Text("\(L10n.t(.copy)) \(title)"))
+            .accessibilityHint(Text(L10n.t(.accessibilityCopy)))
         }
     }
 
@@ -834,6 +877,7 @@ private struct DashboardRegionPickerSheet: View {
             }
         }
         .navigationViewStyle(StackNavigationViewStyle())
+        .accessibilityIdentifier("dashboardRegionPickerSheet")
     }
 
     private func regionRow(label: String, code: String) -> some View {
@@ -848,9 +892,14 @@ private struct DashboardRegionPickerSheet: View {
                 if selectedCode == code {
                     Image(systemName: "checkmark")
                         .foregroundStyle(AppTheme.iranGreen)
-                }
+                        .accessibilityHidden(true)
+                    }
             }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(label))
+        .accessibilityValue(Text(selectedCode == code ? L10n.t(.accessibilitySelected) : ""))
+        .accessibilityAddTraits(selectedCode == code ? .isSelected : [])
     }
 }
 
@@ -868,6 +917,7 @@ private struct StatTile: View {
                 HStack(spacing: 8) {
                     Image(systemName: icon)
                         .foregroundStyle(tint)
+                        .accessibilityHidden(true)
                     Text(title)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
@@ -881,6 +931,9 @@ private struct StatTile: View {
                     .lineLimit(1)
                     .accessibilityIdentifier(id)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(title))
+            .accessibilityValue(Text(value))
         }
     }
 }
@@ -897,9 +950,11 @@ private struct ConfigSetupBanner: View {
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(AppTheme.iranRed)
+                    .accessibilityHidden(true)
             }
         }
         .accessibilityIdentifier("config_setup_banner")
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -918,7 +973,7 @@ private struct ErrorBanner: View {
                     .font(.footnote)
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
                 if let message, !message.isEmpty {
-                    Text(message)
+                Text(message)
                         .font(.caption)
                         .foregroundStyle(AppTheme.secondaryText(for: colorScheme).opacity(0.85))
                 }
@@ -933,6 +988,7 @@ private struct ErrorBanner: View {
                     .accessibilityIdentifier("open_ios_settings_button")
                 }
             }
+            .accessibilityElement(children: .contain)
         }
         .accessibilityIdentifier("error_banner")
     }

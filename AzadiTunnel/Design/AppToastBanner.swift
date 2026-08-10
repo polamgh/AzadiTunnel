@@ -21,5 +21,8 @@ struct AppToastBanner: View {
                     .stroke(AppTheme.iranGreen.opacity(0.35), lineWidth: 1)
             )
             .padding(.horizontal, 20)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(message))
+            .accessibilityAddTraits(.isStaticText)
     }
 }

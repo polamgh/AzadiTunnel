@@ -27,10 +27,12 @@ struct CopyableIPRow: View {
                 } label: {
                     Image(systemName: "doc.on.doc")
                         .font(.caption.weight(.semibold))
+                        .accessibilityHidden(true)
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(AppTheme.iranGreen)
-                .accessibilityLabel(L10n.t(.copy))
+                .accessibilityLabel(Text("\(L10n.t(.copy)) \(label)"))
+                .accessibilityHint(Text("\(L10n.t(.copy)) \(label)"))
             }
         }
     }

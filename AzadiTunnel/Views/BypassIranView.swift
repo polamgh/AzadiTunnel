@@ -40,6 +40,7 @@ struct BypassIranView: View {
             .navigationTitle(L10n.t(.bypassNavTitle))
             .navigationBarTitleDisplayMode(.inline)
             .id(lang.revision)
+            .accessibilityIdentifier("bypassIranScreen")
             .onAppear {
                 refresh()
                 // Pull a fresh list on first open (throttled) so the count/date populate.
@@ -96,18 +97,27 @@ struct BypassIranView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("bypassListCount")
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.bypassListCount)))
+            .accessibilityValue(Text("\(listCount)"))
             HStack {
                 Text(L10n.t(.bypassListUpdated))
                 Spacer()
                 Text(updatedText)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.bypassListUpdated)))
+            .accessibilityValue(Text(updatedText))
             HStack {
                 Text(L10n.t(.bypassRoutesApplied))
                 Spacer()
                 Text("\(routesApplied)")
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.bypassRoutesApplied)))
+            .accessibilityValue(Text("\(routesApplied)"))
             // Warning per requirement: bypass ON but no usable list at all → VPN stays normal.
             if settings.bypassIranIPsEnabled && listCount == 0 {
                 Text(L10n.t(.bypassNoListWarning))
@@ -131,6 +141,8 @@ struct BypassIranView: View {
                 }
             }
             .disabled(isUpdating)
+            .accessibilityLabel(Text(isUpdating ? L10n.t(.bypassUpdating) : L10n.t(.bypassUpdateListNow)))
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             .accessibilityIdentifier("bypassUpdateListButton")
         }
     }
@@ -142,6 +154,8 @@ struct BypassIranView: View {
                 .font(.callout.monospaced())
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityLabel(Text(L10n.t(.bypassCustomSection)))
+                .accessibilityHint(Text(L10n.t(.bypassCustomHint)))
                 .accessibilityIdentifier("bypassCustomEditor")
             Text(L10n.t(.bypassCustomHint))
                 .font(.footnote)
@@ -156,6 +170,8 @@ struct BypassIranView: View {
                 .font(.callout.monospaced())
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .accessibilityLabel(Text(L10n.t(.bypassDomainSection)))
+                .accessibilityHint(Text(L10n.t(.bypassDomainHint)))
                 .accessibilityIdentifier("bypassDomainEditor")
             Text(L10n.t(.bypassDomainHint))
                 .font(.footnote)
@@ -172,6 +188,8 @@ struct BypassIranView: View {
                 }
             }
             .disabled(isResolving)
+            .accessibilityLabel(Text(isResolving ? L10n.t(.bypassResolving) : L10n.t(.bypassResolveNow)))
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             Text(L10n.t(.bypassDomainWarning))
                 .font(.footnote)
                 .foregroundStyle(.orange)
@@ -183,6 +201,7 @@ struct BypassIranView: View {
             Button(L10n.t(.bypassSaveApply)) {
                 Task { await saveAndApply() }
             }
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             .accessibilityIdentifier("bypassSaveButton")
         }
     }

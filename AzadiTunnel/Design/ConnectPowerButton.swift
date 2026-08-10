@@ -48,7 +48,38 @@ struct ConnectPowerButton: View {
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.42)
         .accessibilityIdentifier("connectButton")
+        .accessibilityLabel(Text(powerButtonLabel))
+        .accessibilityValue(Text(L10n.t(.status) + ": " + statusAccessibilityValue))
+        .accessibilityHint(Text(powerButtonHint))
         .animation(.spring(response: 0.35, dampingFraction: 0.72), value: status)
+    }
+
+    private var powerButtonLabel: String {
+        switch status {
+        case .connected, .connecting, .disconnecting:
+            return L10n.t(.accessibilityDisconnect)
+        case .disconnected, .error:
+            return L10n.t(.accessibilityConnect)
+        }
+    }
+
+    private var statusAccessibilityValue: String {
+        switch status {
+        case .connected: return L10n.t(.connected)
+        case .connecting: return L10n.t(.connecting)
+        case .disconnecting: return L10n.t(.disconnecting)
+        case .disconnected: return L10n.t(.disconnected)
+        case .error: return L10n.t(.failed)
+        }
+    }
+
+    private var powerButtonHint: String {
+        switch status {
+        case .connected, .connecting, .disconnecting:
+            return L10n.t(.accessibilityDisconnect)
+        case .disconnected, .error:
+            return L10n.t(.accessibilityConnect)
+        }
     }
 
     // MARK: - Layers
@@ -227,6 +258,7 @@ struct ConnectPowerButton: View {
                 .foregroundStyle(powerIconGradient)
                 .shadow(color: .black.opacity(0.35), radius: 3, y: 2)
                 .shadow(color: accent.opacity(status == .connected ? 0.45 : 0.2), radius: 8)
+                .accessibilityHidden(true)
         }
     }
 

@@ -35,6 +35,7 @@ struct ProxyOnlySettingsView: View {
             .navigationTitle(L10n.t(.proxyOnlyNavTitle))
             .navigationBarTitleDisplayMode(.inline)
             .id(lang.revision)
+            .accessibilityIdentifier("proxyOnlyScreen")
             .onAppear {
                 refreshAll()
                 startStatusTicker()
@@ -91,6 +92,9 @@ struct ProxyOnlySettingsView: View {
                 Text(currentModeLabel)
                     .foregroundStyle(settings.proxyOnlyModeEnabled ? .orange : .primary)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.status)))
+            .accessibilityValue(Text(currentModeLabel))
             .accessibilityIdentifier("proxyOnlyModeLabel")
         }
     }
@@ -174,12 +178,15 @@ struct ProxyOnlySettingsView: View {
                 }
             }
             .disabled(selfTestRunning || vpn.status != .connected || !wifiAvailable)
+            .accessibilityLabel(Text(selfTestRunning ? L10n.t(.proxyOnlySocksSelfTestRunning) : L10n.t(.proxyOnlySocksSelfTestButton)))
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             .accessibilityIdentifier("proxyOnlySocksSelfTestButton")
             if !selfTestSummary.isEmpty {
                 Text(selfTestSummary)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
+                    .accessibilityAddTraits(.isStaticText)
             }
         }
     }
@@ -205,6 +212,7 @@ struct ProxyOnlySettingsView: View {
             } label: {
                 Text(L10n.t(.shareProxyNavTitle))
             }
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
             .accessibilityIdentifier("proxyOnlyShareProxyLink")
         }
     }
@@ -224,8 +232,10 @@ struct ProxyOnlySettingsView: View {
             }
             .buttonStyle(.borderless)
             .disabled(!enabled)
-            .accessibilityLabel(L10n.t(.copy))
+            .accessibilityLabel(Text("\(L10n.t(.copy)) \(title)"))
+            .accessibilityHint(Text(L10n.t(.accessibilityCopy)))
         }
+        .accessibilityElement(children: .contain)
     }
 
     private var sameDeviceHost: String? {

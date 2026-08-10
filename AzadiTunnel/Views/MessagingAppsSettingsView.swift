@@ -50,6 +50,7 @@ struct MessagingAppsSettingsView: View {
         }
         .navigationTitle(L10n.t(.messagingCompatNavTitle))
         .id(lang.revision)
+        .accessibilityIdentifier("messagingAppsSettingsScreen")
         .onAppear {
             settings = SharedSettingsStore.shared.appSettings
         }

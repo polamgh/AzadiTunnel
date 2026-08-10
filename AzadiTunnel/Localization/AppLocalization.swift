@@ -31,6 +31,15 @@ final class AppLanguageController: ObservableObject {
         }
     }
 
+    /// BCP 47 language tag used by VoiceOver for the app's accessibility text.
+    var accessibilityLanguage: String {
+        switch effectiveLanguage {
+        case .persian: return "fa-IR"
+        case .english: return "en-US"
+        case .system: return locale.identifier
+        }
+    }
+
     var layoutDirection: LayoutDirection {
         effectiveLanguage == .persian ? .rightToLeft : .leftToRight
     }
@@ -179,6 +188,14 @@ final class AppLanguageController: ObservableObject {
         case vpnPing
         case refreshPing
         case copy
+        case accessibilityConnect
+        case accessibilityDisconnect
+        case accessibilitySelect
+        case accessibilitySelected
+        case accessibilityCopy
+        case accessibilityOpen
+        case accessibilityPurchase
+        case accessibilityLoading
         case copiedToClipboard
         case testPass
         case testFail
@@ -227,6 +244,8 @@ final class AppLanguageController: ObservableObject {
         case settingsProxy
         case settingsProxyEnable
         case settingsProxyHost
+        case settingsProxyUsername
+        case settingsProxyPassword
         case settingsProxyPort
         case settingsProxySystem
         case settingsBehavior

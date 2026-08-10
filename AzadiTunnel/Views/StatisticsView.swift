@@ -28,6 +28,9 @@ struct StatisticsView: View {
                             .font(.subheadline.monospacedDigit())
                             .foregroundStyle(.white.opacity(0.85))
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text(L10n.t(.session)))
+                        .accessibilityValue(Text("\(sessionDurationLabel). \(L10n.t(.download)): \(ByteCountFormatter.formatTotal(vpn.statistics.bytesDown)). \(L10n.t(.upload)): \(ByteCountFormatter.formatTotal(vpn.statistics.bytesUp))"))
                     }
 
                     if !downHistory.isEmpty {
@@ -41,6 +44,7 @@ struct StatisticsView: View {
         }
         .navigationTitle(L10n.t(.statisticsTitle))
         .id(lang.revision)
+        .accessibilityIdentifier("statisticsScreen")
         .task {
             while !Task.isCancelled {
                 vpn.refreshStatistics()
@@ -65,6 +69,9 @@ struct StatisticsView: View {
                     .foregroundStyle(AppTheme.accent)
                 }
                 .frame(height: 140)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(L10n.t(.downloadSpeed)))
+                .accessibilityValue(Text(latestDownloadSpeedLabel))
             } else {
                 let peak = downHistory.map(\.bytesPerSecond).max() ?? 1
                 VStack(alignment: .leading, spacing: 4) {
@@ -83,6 +90,9 @@ struct StatisticsView: View {
                     }
                 }
                 .frame(minHeight: 140, alignment: .topLeading)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(Text(L10n.t(.downloadSpeed)))
+                .accessibilityValue(Text(latestDownloadSpeedLabel))
             }
         }
     }
@@ -100,6 +110,11 @@ struct StatisticsView: View {
     private var sessionDurationLabel: String {
         guard vpn.status == .connected else { return "00:00:00" }
         return ByteCountFormatter.formatDuration(vpn.statistics.sessionDuration)
+    }
+
+    private var latestDownloadSpeedLabel: String {
+        guard let latest = downHistory.last else { return "—" }
+        return ByteCountFormatter.formatSpeed(latest.bytesPerSecond)
     }
 }
 

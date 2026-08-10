@@ -48,6 +48,7 @@ struct OnboardingView: View {
                                     .font(.system(size: 56))
                                     .foregroundStyle(AppTheme.iranGreen)
                                     .padding(.top, 40)
+                                    .accessibilityHidden(true)
                             }
                             Text(L10n.t(item.titleKey))
                                 .font(.title2.bold())
@@ -60,6 +61,8 @@ struct OnboardingView: View {
                                 .padding(.horizontal, 28)
                             Spacer()
                         }
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(Text("\(L10n.t(item.titleKey)). \(L10n.t(item.bodyKey))"))
                         .tag(index)
                     }
                 }
@@ -76,6 +79,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 28)
                 .accessibilityIdentifier("onboarding_continue_button")
+                .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             }
             .background(AppTheme.backgroundGradient(for: colorScheme).ignoresSafeArea())
             .navigationTitle(L10n.t(.onboardingNavTitle))
@@ -85,6 +89,7 @@ struct OnboardingView: View {
                     if page > 0 {
                         Button(L10n.t(.onboardingSkip)) { finish() }
                             .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
                     }
                 }
             }

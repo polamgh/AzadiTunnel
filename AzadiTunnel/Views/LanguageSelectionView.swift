@@ -42,6 +42,7 @@ struct LanguageSelectionView: View {
 
                 Spacer(minLength: 40)
             }
+            .accessibilityElement(children: .contain)
         }
         .accessibilityIdentifier("languageSelectionScreen")
     }
@@ -68,6 +69,7 @@ struct LanguageSelectionView: View {
                 Image(systemName: "chevron.right")
                     .font(.body.weight(.semibold))
                     .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -81,6 +83,10 @@ struct LanguageSelectionView: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(title))
+        .accessibilityValue(Text(subtitle))
+        .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
         .accessibilityIdentifier(identifier)
     }
 

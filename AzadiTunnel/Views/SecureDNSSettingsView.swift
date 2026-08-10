@@ -31,6 +31,7 @@ struct SecureDNSSettingsView: View {
             .navigationTitle(L10n.t(.secureDnsNavTitle))
             .navigationBarTitleDisplayMode(.inline)
             .id(lang.revision)
+            .accessibilityIdentifier("secureDnsScreen")
             .onAppear {
                 refresh()
                 startStatusTicker()
@@ -75,6 +76,9 @@ struct SecureDNSSettingsView: View {
                     .foregroundStyle(AppTheme.accent)
                     .multilineTextAlignment(.trailing)
             }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text(L10n.t(.secureDnsActiveSelection)))
+            .accessibilityValue(Text(activeSelectionSummary))
 
             ForEach(SecureDNSMode.allCases) { mode in
                 modeOptionRow(mode)
@@ -102,6 +106,7 @@ struct SecureDNSSettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
+                .accessibilityLabel(Text(L10n.t(.secureDnsCustomDoHURL)))
                 .onChange(of: settings.customDoHURL) { _ in persist("secure_dns_custom_doh") }
         }
     }
@@ -116,10 +121,13 @@ struct SecureDNSSettingsView: View {
             } label: {
                 HStack {
                     Image(systemName: "checkmark.shield")
+                        .accessibilityHidden(true)
                     Text(testRunning ? L10n.t(.secureDnsTestRunning) : L10n.t(.secureDnsTestButton))
                 }
             }
             .disabled(testRunning)
+            .accessibilityLabel(Text(testRunning ? L10n.t(.secureDnsTestRunning) : L10n.t(.secureDnsTestButton)))
+            .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
             .accessibilityIdentifier("secureDnsTestButton")
             if !testSummary.isEmpty {
                 Text(testSummary)
@@ -162,11 +170,15 @@ struct SecureDNSSettingsView: View {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selected ? AppTheme.accent : Color.secondary.opacity(0.35))
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, 6)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(modeTitle(mode)))
+        .accessibilityValue(Text(modeDetail(mode) + (selected ? ". " + L10n.t(.accessibilitySelected) : "")))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -184,11 +196,15 @@ struct SecureDNSSettingsView: View {
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
                     .font(.title3)
                     .foregroundStyle(selected ? AppTheme.accent : Color.secondary.opacity(0.35))
+                    .accessibilityHidden(true)
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(providerLabel(provider)))
+        .accessibilityValue(Text(selected ? L10n.t(.accessibilitySelected) : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
@@ -204,6 +220,7 @@ struct SecureDNSSettingsView: View {
             Image(systemName: modeIconName(mode))
                 .font(.body.weight(.semibold))
                 .foregroundStyle(selected ? AppTheme.accent : AppTheme.secondaryText(for: colorScheme))
+                .accessibilityHidden(true)
         }
     }
 
@@ -219,6 +236,7 @@ struct SecureDNSSettingsView: View {
             Image(systemName: providerIconName(provider))
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(selected ? AppTheme.accent : AppTheme.secondaryText(for: colorScheme))
+                .accessibilityHidden(true)
         }
     }
 

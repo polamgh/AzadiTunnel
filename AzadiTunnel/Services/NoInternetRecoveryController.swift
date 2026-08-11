@@ -183,7 +183,8 @@ enum NoInternetRecoveryController {
             detail: String,
             settings: AppSettings,
             fallbackStep: FallbackStep? = nil,
-            timeoutSeconds: TimeInterval? = nil
+            timeoutSeconds: TimeInterval? = nil,
+            minimumTimeoutSeconds: TimeInterval = RecoveryTimingDefaults.minimumAttemptBudget
         ) {
             guard !plans.contains(where: { $0.attempt.settings == settings }) else { return }
             let id = "\(phase.rawValue)#\(plans.count)"
@@ -194,7 +195,8 @@ enum NoInternetRecoveryController {
                 attempt: RecoveryAttemptRunner.Attempt(
                     id: id,
                     settings: settings,
-                    timeoutSeconds: timeoutSeconds ?? settings.fallbackTimeoutDirect
+                    timeoutSeconds: timeoutSeconds ?? settings.fallbackTimeoutDirect,
+                    minimumTimeoutSeconds: minimumTimeoutSeconds
                 )
             ))
         }
@@ -230,6 +232,7 @@ enum NoInternetRecoveryController {
                 var trial = original
                 trial.protocolSelection = step.protocolSelection
                 trial.beastModeEnabled = step.beast
+                trial.cdnFrontingAttemptStrategy = step.cdnAttemptStrategy
                 if let conduitMode = step.conduitMode {
                     trial.conduitMode = conduitMode
                     trial.conduitFallbackToPublic = true
@@ -239,7 +242,8 @@ enum NoInternetRecoveryController {
                     detail: "transport=\(step.transport.rawValue)",
                     settings: trial,
                     fallbackStep: step.transport,
-                    timeoutSeconds: step.timeoutSeconds
+                    timeoutSeconds: step.timeoutSeconds,
+                    minimumTimeoutSeconds: step.minimumTimeoutSeconds
                 )
             }
 

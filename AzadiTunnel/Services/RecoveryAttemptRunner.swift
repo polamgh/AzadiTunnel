@@ -53,6 +53,19 @@ struct RecoveryAttemptRunner {
         let id: String
         let settings: AppSettings
         let timeoutSeconds: TimeInterval
+        let minimumTimeoutSeconds: TimeInterval
+
+        init(
+            id: String,
+            settings: AppSettings,
+            timeoutSeconds: TimeInterval,
+            minimumTimeoutSeconds: TimeInterval = RecoveryTimingDefaults.minimumAttemptBudget
+        ) {
+            self.id = id
+            self.settings = settings
+            self.timeoutSeconds = timeoutSeconds
+            self.minimumTimeoutSeconds = minimumTimeoutSeconds
+        }
     }
 
     enum Result {
@@ -163,7 +176,7 @@ struct RecoveryAttemptRunner {
 
             let timeout = min(
                 RecoveryTimingDefaults.perAttemptBudget,
-                max(RecoveryTimingDefaults.minimumAttemptBudget, attempt.timeoutSeconds),
+                max(attempt.minimumTimeoutSeconds, attempt.timeoutSeconds),
                 budget.remaining
             )
             guard timeout > 0 else {

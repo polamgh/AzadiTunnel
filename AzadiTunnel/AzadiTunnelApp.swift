@@ -13,6 +13,10 @@ struct AzadiTunnelApp: App {
 
     init() {
         AppLocalizationUI.register()
+        // Firebase is initialized independently of VPN startup. If its config
+        // is unavailable, the analytics service exits silently and connection
+        // behavior remains unchanged.
+        FirebaseAnalyticsService.configure()
         let args = ProcessInfo.processInfo.arguments
         if args.contains("-UITestMode") {
             if args.contains("-UITestClearLogs") {

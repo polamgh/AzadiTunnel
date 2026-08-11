@@ -4,6 +4,7 @@ struct ConnectPowerButton: View {
     @Environment(\.colorScheme) private var colorScheme
     let status: VPNStatusDisplay
     let isEnabled: Bool
+    var size: CGFloat = 220
     let action: () -> Void
 
     @State private var pressed = false
@@ -42,6 +43,8 @@ struct ConnectPowerButton: View {
                 powerGlyph
             }
             .frame(width: 220, height: 220)
+            .scaleEffect(size / 220)
+            .frame(width: size, height: size)
             .scaleEffect(pressed ? 0.93 : 1)
         }
         .buttonStyle(.plain)

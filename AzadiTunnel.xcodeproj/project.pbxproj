@@ -10,6 +10,8 @@
 		A10001012FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10001002FCFF95000D0A30A /* AzadiTunnelPacketTunnel.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		A10006012FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; };
 		A10006032FCFF95000D0A30A /* PsiphonTunnelCore.xcframework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = A10006002FCFF95000D0A30A /* PsiphonTunnelCore.xcframework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		FBA100010000000000000001 /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = FBA300010000000000000001 /* FirebaseCore */; };
+		FBA100020000000000000002 /* FirebaseAnalyticsCore in Frameworks */ = {isa = PBXBuildFile; productRef = FBA300020000000000000002 /* FirebaseAnalyticsCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -108,6 +110,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FBA100010000000000000001 /* FirebaseCore in Frameworks */,
+				FBA100020000000000000002 /* FirebaseAnalyticsCore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -192,6 +196,8 @@
 			);
 			name = AzadiTunnel;
 			packageProductDependencies = (
+				FBA300010000000000000001 /* FirebaseCore */,
+				FBA300020000000000000002 /* FirebaseAnalyticsCore */,
 			);
 			productName = AzadiTunnel;
 			productReference = 2C35943D2FCFF94200D0A30A /* AzadiTunnel.app */;
@@ -303,6 +309,7 @@
 			mainGroup = 2C3594342FCFF94200D0A30A;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
+				FBA200010000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 2C35943E2FCFF94200D0A30A /* Products */;
@@ -526,7 +533,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AzadiTunnel/AzadiTunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QF88W2GKT;
 				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_PREVIEWS = YES;
@@ -543,7 +550,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.4.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -563,7 +574,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = AzadiTunnel/AzadiTunnel.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = 4QF88W2GKT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -579,7 +590,11 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.4.1;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.polamgh.ali.AzadiTunnel;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -792,6 +807,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		FBA200010000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk.git";
+			requirement = {
+				kind = exactVersion;
+				version = 12.17.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FBA300010000000000000001 /* FirebaseCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBA200010000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseCore;
+		};
+		FBA300020000000000000002 /* FirebaseAnalyticsCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FBA200010000000000000001 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAnalyticsCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 2C3594352FCFF94200D0A30A /* Project object */;
 }

@@ -24,6 +24,9 @@ struct AppSettings: Codable, Equatable {
     var cdnFrontingCustomSni: String = ""
     /// Shiro always sets `FrontedMeekCDNScanUseBuiltInSpec` true; toggle disables built-in scan spec.
     var cdnFrontingUseBuiltInScan: Bool = true
+    /// Session-only strategy used by the bounded CDN recovery chain. Normal persisted settings
+    /// leave this nil; recovery overlays try the core-managed scan before static app overrides.
+    var cdnFrontingAttemptStrategy: CDNFrontingAttemptStrategy? = nil
     var beastModeEnabled: Bool = true
     /// When enabled, Auto tries Auto+Beast/Tactics → CDN fronting → Direct, with Public Conduit last
     /// when the configured Psiphon data permits it. Explicit Direct remains Direct only.
@@ -120,6 +123,15 @@ struct AppSettings: Codable, Equatable {
             case .conduit: return "Conduit"
             }
         }
+    }
+
+    enum CDNFrontingAttemptStrategy: String, Codable {
+        /// Current signed Psiphon fronting routes, with UDP/QUIC excluded for restrictive networks.
+        case dynamicTCP = "dynamic_tcp"
+        /// Shiro-compatible built-in/static edge overrides, with UDP/QUIC excluded.
+        case staticTCP = "static_tcp"
+        /// Full Shiro-compatible static route and three-protocol set, including QUIC.
+        case staticAll = "static_all"
     }
 
     enum VPNOnDemandMode: String, Codable, CaseIterable, Identifiable {

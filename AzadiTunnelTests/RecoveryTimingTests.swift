@@ -41,8 +41,81 @@ final class RecoveryTimingTests: XCTestCase {
         )
     }
 
-    private func attempt(id: String, settings: AppSettings, timeout: TimeInterval = 25) -> RecoveryAttemptRunner.Attempt {
-        RecoveryAttemptRunner.Attempt(id: id, settings: settings, timeoutSeconds: timeout)
+    private func attempt(
+        id: String,
+        settings: AppSettings,
+        timeout: TimeInterval = 25,
+        minimumTimeout: TimeInterval = RecoveryTimingDefaults.minimumAttemptBudget
+    ) -> RecoveryAttemptRunner.Attempt {
+        RecoveryAttemptRunner.Attempt(
+            id: id,
+            settings: settings,
+            timeoutSeconds: timeout,
+            minimumTimeoutSeconds: minimumTimeout
+        )
+    }
+
+    func testExplicitCDNRotatesDynamicAndStaticRoutesBeforeOtherTransports() {
+        var settings = AppSettings()
+        settings.protocolSelection = .cdnFronting
+        settings.fallbackTimeoutCDN = 120
+
+        let steps = FallbackChainController.steps(for: .cdnFronting, settings: settings)
+
+        XCTAssertGreaterThanOrEqual(steps.count, 5)
+        XCTAssertEqual(Array(steps.prefix(3).map(\.attemptID)), [
+            "cdn_dynamic_tcp",
+            "cdn_static_tcp",
+            "cdn_static_all"
+        ])
+        XCTAssertEqual(Array(steps.prefix(3).map(\.transport)), [.cdn, .cdn, .cdn])
+        XCTAssertEqual(Array(steps.prefix(3).compactMap(\.cdnAttemptStrategy)), [
+            .dynamicTCP,
+            .staticTCP,
+            .staticAll
+        ])
+        XCTAssertEqual(steps[0].timeoutSeconds, 12)
+        XCTAssertEqual(steps[0].minimumTimeoutSeconds, 12)
+        XCTAssertEqual(steps[1].timeoutSeconds, 18)
+        XCTAssertEqual(steps[1].minimumTimeoutSeconds, 18)
+        XCTAssertEqual(steps[3].transport, .autoBeast)
+        XCTAssertEqual(steps[4].transport, .direct)
+    }
+
+    func testCDNRecoveryStrategiesComposeDistinctRoutesAndProtocolSets() throws {
+        func dictionary(for settings: AppSettings) throws -> [String: Any] {
+            let json = try PsiphonConfigComposer.compose(baseJSON: "{}", settings: settings)
+            return try XCTUnwrap(
+                JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any]
+            )
+        }
+
+        var settings = AppSettings()
+        settings.protocolSelection = .cdnFronting
+
+        settings.cdnFrontingAttemptStrategy = .dynamicTCP
+        let dynamic = try dictionary(for: settings)
+        XCTAssertNil(dynamic["FrontedMeekDialOverrides"])
+        XCTAssertEqual(
+            dynamic["LimitTunnelProtocols"] as? [String],
+            PsiphonProtocolSets.cdnFrontingTCP
+        )
+
+        settings.cdnFrontingAttemptStrategy = .staticTCP
+        let staticTCP = try dictionary(for: settings)
+        XCTAssertFalse((staticTCP["FrontedMeekDialOverrides"] as? [[String: Any]] ?? []).isEmpty)
+        XCTAssertEqual(
+            staticTCP["LimitTunnelProtocols"] as? [String],
+            PsiphonProtocolSets.cdnFrontingTCP
+        )
+
+        settings.cdnFrontingAttemptStrategy = .staticAll
+        let staticAll = try dictionary(for: settings)
+        XCTAssertFalse((staticAll["FrontedMeekDialOverrides"] as? [[String: Any]] ?? []).isEmpty)
+        XCTAssertEqual(
+            staticAll["LimitTunnelProtocols"] as? [String],
+            PsiphonProtocolSets.cdnFronting
+        )
     }
 
     func testSingleBudgetCapsAttemptsAndUsesMonotonicClock() async {

@@ -132,20 +132,38 @@ struct IranFlagStripe: View {
 struct GlassCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     var elevated = false
+    var transparent = false
+    var compact = false
     @ViewBuilder var content: Content
+
+    private var fillColor: Color {
+        if transparent {
+            return colorScheme == .dark
+                ? Color.black.opacity(0.18)
+                : Color.white.opacity(0.18)
+        }
+        return elevated
+            ? AppTheme.cardFillElevated(for: colorScheme)
+            : AppTheme.cardFill(for: colorScheme)
+    }
+
+    private var materialOpacity: Double {
+        if transparent {
+            return colorScheme == .dark ? 0.12 : 0.06
+        }
+        return colorScheme == .dark ? 0.35 : 0.55
+    }
 
     var body: some View {
         content
-            .padding()
+            .padding(compact ? 10 : 16)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(elevated
-                        ? AppTheme.cardFillElevated(for: colorScheme)
-                        : AppTheme.cardFill(for: colorScheme))
+                    .fill(fillColor)
                     .background(
                         RoundedRectangle(cornerRadius: 22, style: .continuous)
-                            .fill(.ultraThinMaterial.opacity(colorScheme == .dark ? 0.35 : 0.55))
+                            .fill(.ultraThinMaterial.opacity(materialOpacity))
                     )
             )
             .overlay(

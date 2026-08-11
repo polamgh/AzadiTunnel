@@ -7,6 +7,7 @@ enum PublicIPFetcher {
     static func fetchIfNeeded() async {
         guard SharedSettingsStore.shared.lastInternetTestOK else { return }
         if PublicIPAddress.normalized(TunnelStatisticsStore.load().lastPublicIP) != nil {
+            await EgressGeoLookup.refreshIfNeeded()
             return
         }
         if SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled {

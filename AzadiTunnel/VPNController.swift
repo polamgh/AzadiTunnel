@@ -191,6 +191,14 @@ final class VPNController: ObservableObject {
 
         presentConnectingState()
 
+        // Record the physical-network origin before NetworkExtension changes
+        // the default route. UI feedback is already in Connecting state while
+        // this short, parallel-provider lookup runs.
+        if recoverySessionID == nil, !skipFallbackChain {
+            await OriginGeoLookup.shared.captureBeforeConnect()
+            refreshStatistics()
+        }
+
         let selection = SharedSettingsStore.shared.appSettings.protocolSelection
         if !skipFallbackChain, FallbackChainController.shouldUseChain(for: selection) {
             let ok = await FallbackChainController.connectWithChain(vpn: self)
@@ -507,11 +515,13 @@ final class VPNController: ObservableObject {
                 refreshStatistics()
                 _ = await LeakTestService.runAfterConnect()
                 _ = await ConnectionQualityService.runAfterConnect()
+                FirebaseAnalyticsService.logConnectionEstablished()
             } else {
                 SharedLogger.shared.log(.proxyOnlyWarningNotFullVPN)
                 try? await Task.sleep(nanoseconds: 1_500_000_000)
                 await PublicIPFetcher.fetchIfNeeded()
                 refreshStatistics()
+                FirebaseAnalyticsService.logConnectionEstablished()
             }
         } else {
             banner = .internetTestFailed

@@ -3,24 +3,33 @@ import Foundation
 @MainActor
 enum FallbackChainController {
     struct Step: Equatable {
+        let attemptID: String
         let transport: FallbackStep
         let protocolSelection: AppSettings.ProtocolSelection
         let beast: Bool
         let timeoutSeconds: TimeInterval
+        let minimumTimeoutSeconds: TimeInterval
         let conduitMode: AppSettings.ConduitMode?
+        let cdnAttemptStrategy: AppSettings.CDNFrontingAttemptStrategy?
 
         init(
+            attemptID: String? = nil,
             transport: FallbackStep,
             protocolSelection: AppSettings.ProtocolSelection,
             beast: Bool,
             timeoutSeconds: TimeInterval,
-            conduitMode: AppSettings.ConduitMode? = nil
+            minimumTimeoutSeconds: TimeInterval = RecoveryTimingDefaults.minimumAttemptBudget,
+            conduitMode: AppSettings.ConduitMode? = nil,
+            cdnAttemptStrategy: AppSettings.CDNFrontingAttemptStrategy? = nil
         ) {
+            self.attemptID = attemptID ?? transport.rawValue
             self.transport = transport
             self.protocolSelection = protocolSelection
             self.beast = beast
             self.timeoutSeconds = timeoutSeconds
+            self.minimumTimeoutSeconds = minimumTimeoutSeconds
             self.conduitMode = conduitMode
+            self.cdnAttemptStrategy = cdnAttemptStrategy
         }
     }
 
@@ -36,7 +45,7 @@ enum FallbackChainController {
             for: policySelection,
             includePublicConduit: SharedSettingsStore.shared.conduitConnectAllowed
         )
-        return candidates.map { candidate in
+        let standardSteps = candidates.map { candidate in
             let timeout: TimeInterval
             switch candidate.transport {
             case .cdn:
@@ -59,6 +68,48 @@ enum FallbackChainController {
                 conduitMode: candidate.transport == .conduitPublic ? .publicOnly : nil
             )
         }
+
+        guard selection == .cdnFronting,
+              let first = standardSteps.first,
+              first.transport == .cdn else {
+            return standardSteps
+        }
+
+        // A fixed edge can complete TLS/SSH and still fail Psiphon's activation handshake, as
+        // seen on restrictive networks. Rotate the route strategy automatically instead of
+        // requiring the user to toggle Region to perturb candidate ordering.
+        let dynamicTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 12)
+        let staticTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 18)
+        let cdnSteps = [
+            Step(
+                attemptID: "cdn_dynamic_tcp",
+                transport: .cdn,
+                protocolSelection: .cdnFronting,
+                beast: true,
+                timeoutSeconds: dynamicTimeout,
+                minimumTimeoutSeconds: dynamicTimeout,
+                cdnAttemptStrategy: .dynamicTCP
+            ),
+            Step(
+                attemptID: "cdn_static_tcp",
+                transport: .cdn,
+                protocolSelection: .cdnFronting,
+                beast: true,
+                timeoutSeconds: staticTimeout,
+                minimumTimeoutSeconds: staticTimeout,
+                cdnAttemptStrategy: .staticTCP
+            ),
+            Step(
+                attemptID: "cdn_static_all",
+                transport: .cdn,
+                protocolSelection: .cdnFronting,
+                beast: true,
+                timeoutSeconds: first.timeoutSeconds,
+                minimumTimeoutSeconds: first.minimumTimeoutSeconds,
+                cdnAttemptStrategy: .staticAll
+            )
+        ]
+        return cdnSteps + Array(standardSteps.dropFirst())
     }
 
     static func shouldUseChain(for selection: AppSettings.ProtocolSelection) -> Bool {
@@ -127,14 +178,16 @@ enum FallbackChainController {
             var trial = original
             trial.protocolSelection = step.protocolSelection
             trial.beastModeEnabled = step.beast
+            trial.cdnFrontingAttemptStrategy = step.cdnAttemptStrategy
             if let conduitMode = step.conduitMode {
                 trial.conduitMode = conduitMode
                 trial.conduitFallbackToPublic = true
             }
             return RecoveryAttemptRunner.Attempt(
-                id: step.transport.rawValue,
+                id: step.attemptID,
                 settings: trial,
-                timeoutSeconds: step.timeoutSeconds
+                timeoutSeconds: step.timeoutSeconds,
+                minimumTimeoutSeconds: step.minimumTimeoutSeconds
             )
         }
 
@@ -152,8 +205,9 @@ enum FallbackChainController {
                 await vpn.connect(skipFallbackChain: true, recoverySessionID: session)
             },
             verify: { attempt, timeout, budget in
+                let step = chainSteps.first(where: { $0.attemptID == attempt.id })
                 let forceFailCDN = ProcessInfo.processInfo.arguments.contains("-UITestForceFallbackFailCDN")
-                    && attempt.id == FallbackStep.cdn.rawValue
+                    && step?.transport == .cdn
                 if forceFailCDN {
                     return false
                 }
@@ -180,16 +234,16 @@ enum FallbackChainController {
                 gate.isCancellationRequested(for: session)
             },
             attemptStarted: { index, attempt in
-                guard let step = chainSteps.first(where: { $0.transport.rawValue == attempt.id }) else { return }
+                guard let step = chainSteps.first(where: { $0.attemptID == attempt.id }) else { return }
                 state.currentStep = step.transport
                 ConnectionDiagnosticsStore.saveFallback(state)
                 SharedLogger.shared.logRaw(
                     "FALLBACK_ATTEMPT",
-                    detail: "transport=\(step.transport.rawValue) step=\(index)/\(chainSteps.count) remaining=\(Int(runBudget.remaining))"
+                    detail: "transport=\(step.transport.rawValue) variant=\(step.attemptID) step=\(index)/\(chainSteps.count) remaining=\(Int(runBudget.remaining))"
                 )
             },
             attemptFinished: { _, attempt, verified in
-                guard let step = chainSteps.first(where: { $0.transport.rawValue == attempt.id }) else { return }
+                guard let step = chainSteps.first(where: { $0.attemptID == attempt.id }) else { return }
                 if verified {
                     state.succeededStep = step.transport
                     state.succeededProtocol = TunnelStatisticsStore.load().connectedTunnelProtocol
@@ -197,7 +251,7 @@ enum FallbackChainController {
                     ConnectionDiagnosticsStore.saveFallback(state)
                     SharedLogger.shared.logRaw(
                         "FALLBACK_SUCCESS",
-                        detail: "transport=\(step.transport.rawValue) protocol=\(state.succeededProtocol)"
+                        detail: "transport=\(step.transport.rawValue) variant=\(step.attemptID) protocol=\(state.succeededProtocol)"
                     )
                 } else {
                     state.lastFailedStep = step.transport
@@ -205,7 +259,7 @@ enum FallbackChainController {
                     ConnectionDiagnosticsStore.saveFallback(state)
                     SharedLogger.shared.logRaw(
                         "FALLBACK_FAILED",
-                        detail: "transport=\(step.transport.rawValue) reason=\(state.lastFailureReason)"
+                        detail: "transport=\(step.transport.rawValue) variant=\(step.attemptID) reason=\(state.lastFailureReason)"
                     )
                 }
             }
@@ -233,7 +287,10 @@ enum FallbackChainController {
             state.exhausted = true
             state.currentStep = nil
             SharedLogger.shared.logRaw("FALLBACK_EXHAUSTED", detail: "all_steps_failed")
-            let tried = chainSteps.map(\.transport.rawValue).joined(separator: ", ")
+            let tried = chainSteps.reduce(into: [String]()) { values, step in
+                let transport = step.transport.rawValue
+                if !values.contains(transport) { values.append(transport) }
+            }.joined(separator: ", ")
             vpn.setFallbackFailureMessage("Could not connect. Tried \(tried). See Logs for FALLBACK_* lines.")
             return false
         }

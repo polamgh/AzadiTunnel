@@ -37,8 +37,15 @@ enum PsiphonShiroCDNFrontingConfig {
         }
 
         let customSni = normalizedFirstSNI(settings.cdnFrontingCustomSni)
-        dict["FrontedMeekDialOverrides"] = makeDialOverrides(customSni: customSni)
-        dict["FrontedMeekDialOverridesProbability"] = 1.0
+        if usesStaticDialOverrides(settings: settings) {
+            dict["FrontedMeekDialOverrides"] = makeDialOverrides(customSni: customSni)
+            dict["FrontedMeekDialOverridesProbability"] = 1.0
+        } else {
+            // Prefer Psiphon's managed CDN scan first. It tracks successful and failed routes and
+            // includes a much broader edge/SNI corpus than the app's fixed legacy override list.
+            dict.removeValue(forKey: "FrontedMeekDialOverrides")
+            dict.removeValue(forKey: "FrontedMeekDialOverridesProbability")
+        }
 
         if settings.cdnFrontingUseBuiltInScan {
             dict["FrontedMeekCDNScanUseBuiltInSpec"] = true
@@ -68,8 +75,11 @@ enum PsiphonShiroCDNFrontingConfig {
             return "enabled=false"
         }
         let limits = dict["LimitTunnelProtocols"] as? [String] ?? []
-        let edgeCount = builtInEdgeIPs.count + parseIPList(settings.cdnFrontingCustomIpList).count
-            + loadBundledExtras().extraEdgeIPs.count
+        let overrideCount = (dict["FrontedMeekDialOverrides"] as? [Any])?.count ?? 0
+        let edgeCount = overrideCount > 0
+            ? builtInEdgeIPs.count + parseIPList(settings.cdnFrontingCustomIpList).count
+                + loadBundledExtras().extraEdgeIPs.count
+            : 0
         let sniCount = parseSNIList(settings.cdnFrontingCustomSni).count
             + loadBundledExtras().extraSniHostnames.count
         let scanBuiltIn = dict["FrontedMeekCDNScanUseBuiltInSpec"] as? Bool == true
@@ -78,10 +88,28 @@ enum PsiphonShiroCDNFrontingConfig {
             "enabled=true",
             "scan_builtin=\(scanBuiltIn)",
             "scan_spec=\(hasScanSpec)",
+            "route=\(overrideCount > 0 ? "static_overrides" : "core_scan")",
             "protocol_limits_count=\(limits.count)",
             "edge_ips_count=\(edgeCount)",
             "sni_hostnames_count=\(sniCount)"
         ].joined(separator: " ")
+    }
+
+    private static func usesStaticDialOverrides(settings: AppSettings) -> Bool {
+        switch settings.cdnFrontingAttemptStrategy {
+        case .dynamicTCP:
+            return false
+        case .staticTCP, .staticAll:
+            return true
+        case nil:
+            // A normal CDN connect without user-provided routes starts from Psiphon's managed
+            // scan. Explicit custom routes remain authoritative.
+            let extras = loadBundledExtras()
+            return !parseIPList(settings.cdnFrontingCustomIpList).isEmpty
+                || !parseSNIList(settings.cdnFrontingCustomSni).isEmpty
+                || !extras.extraEdgeIPs.isEmpty
+                || !extras.extraSniHostnames.isEmpty
+        }
     }
 
     // MARK: - Diagnostics (Shiro TunnelManager notice handlers)

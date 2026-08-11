@@ -106,7 +106,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 )
                 SharedLogger.shared.logRaw(
                     "CDN_FRONTING_PROTOCOL_LIMITS",
-                    detail: "count=\(PsiphonShiroCDNFrontingConfig.cdnFrontingModeProtocols.count) values=\(limits)"
+                    detail: "count=\(PsiphonProtocolSets.expectedLimitJSON(for: activeSettings)?.count ?? 0) values=\(limits)"
                 )
                 let customIPs = PsiphonShiroCDNFrontingConfig.parseIPList(
                     activeSettings.cdnFrontingCustomIpList
@@ -116,7 +116,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 )
                 SharedLogger.shared.logRaw(
                     "CDN_FRONTING_EDGE_IPS",
-                    detail: "builtin=\(PsiphonShiroCDNFrontingConfig.builtInEdgeIPs.count) custom=\(customIPs.count)"
+                    detail: "available_builtin=\(PsiphonShiroCDNFrontingConfig.builtInEdgeIPs.count) custom=\(customIPs.count) strategy=\(activeSettings.cdnFrontingAttemptStrategy?.rawValue ?? "automatic")"
                 )
                 SharedLogger.shared.logRaw(
                     "CDN_FRONTING_SNI_HOSTNAMES",

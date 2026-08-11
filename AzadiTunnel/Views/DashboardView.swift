@@ -26,19 +26,33 @@ struct DashboardView: View {
             (colorScheme == .dark ? Color.black : Color.white)
                 .ignoresSafeArea()
 
+            VPNWorldMapBackground(
+                originCoordinate: originMapCoordinate,
+                destinationCoordinate: egressMapCoordinate,
+                originCountryCode: originCountryCode,
+                destinationCountryCode: destinationCountryCode,
+                isConnected: isMapConnectionVisible
+            )
+
             ScrollView(showsIndicators: false) {
-                VStack(spacing: 22) {
+                VStack(spacing: 16) {
                     header
-                    IranFlagStripe()
-                        .padding(.horizontal, 8)
+                    VStack(spacing: 7) {
+                        IranFlagStripe()
+                            .padding(.horizontal, 8)
+                        statusHero
+                    }
                     if !configReady { ConfigSetupBanner() }
                     if vpn.banner != .none { ErrorBanner(kind: vpn.banner, message: vpn.lastError) }
                     if showProxyOnlyWarning { proxyOnlyWarningBanner }
                     if vpn.status == .connected, showProxyOnlyCard { proxyOnlyCard }
-                    statusHero
+                    Color.clear
+                        .frame(height: 154)
+                        .accessibilityHidden(true)
                     ConnectPowerButton(
                         status: vpn.status,
-                        isEnabled: configReady || vpn.status != .disconnected
+                        isEnabled: configReady || vpn.status != .disconnected,
+                        size: 150
                     ) {
                         if !SharedSettingsStore.shared.appSettings.hasAcceptedConnectionDisclaimer {
                             SharedLogger.shared.logRaw("CONNECT_BLOCKED_PENDING_DISCLAIMER", detail: "source=connect_button")
@@ -118,6 +132,13 @@ struct DashboardView: View {
         .task {
             await vpn.refreshStatusFromSystem()
             refreshConfigFlag()
+            if vpn.status == .disconnected,
+               !ProcessInfo.processInfo.arguments.contains("-UITestMode") {
+                Task {
+                    await OriginGeoLookup.shared.captureBeforeConnect()
+                    vpn.refreshStatistics()
+                }
+            }
             if ProcessInfo.processInfo.arguments.contains("-UITestDisconnect") {
                 await vpn.disconnect()
                 return
@@ -207,46 +228,52 @@ struct DashboardView: View {
     }
 
     private var statusHero: some View {
-        GlassCard(elevated: true) {
-            HStack(alignment: .center, spacing: 16) {
+        GlassCard(elevated: true, transparent: true, compact: true) {
+            HStack(alignment: .center, spacing: 10) {
                 ZStack {
                     Circle()
                         .fill(AppTheme.statusColor(for: vpn.status, scheme: colorScheme).opacity(0.2))
-                        .frame(width: 52, height: 52)
+                        .frame(width: 34, height: 34)
                     Circle()
                         .fill(AppTheme.statusColor(for: vpn.status, scheme: colorScheme))
-                        .frame(width: 14, height: 14)
+                        .frame(width: 10, height: 10)
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(L10n.t(.status))
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
-                        .textCase(.uppercase)
-                    Text(localizedStatusMessage)
-                        .font(.title2.weight(.bold))
-                        .foregroundStyle(AppTheme.statusColor(for: vpn.status, scheme: colorScheme))
-                        .accessibilityLabel(Text(L10n.t(.status)))
-                        .accessibilityValue(Text(localizedStatusMessage))
-                        .accessibilityIdentifier("statusLabel")
-                    if let protocolLabel = connectedProtocolLabel {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.triangle.branch")
-                                .accessibilityHidden(true)
-                                .font(.caption.weight(.semibold))
-                            Text(protocolLabel)
-                                .font(.subheadline.weight(.semibold))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(L10n.t(.status))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
+                            .textCase(.uppercase)
+                        Text(localizedStatusMessage)
+                            .font(.headline.weight(.bold))
+                            .foregroundStyle(AppTheme.statusColor(for: vpn.status, scheme: colorScheme))
+                            .accessibilityLabel(Text(L10n.t(.status)))
+                            .accessibilityValue(Text(localizedStatusMessage))
+                            .accessibilityIdentifier("statusLabel")
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                        if let protocolLabel = connectedProtocolLabel {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.triangle.branch")
+                                    .accessibilityHidden(true)
+                                    .font(.caption2.weight(.semibold))
+                                Text(protocolLabel)
+                                    .font(.caption.weight(.semibold))
+                                    .lineLimit(1)
+                            }
+                            .foregroundStyle(AppTheme.iranGreen)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel(Text(L10n.t(.connectedProtocol)))
+                            .accessibilityIdentifier("connectedProtocolLabel")
                         }
-                        .foregroundStyle(AppTheme.iranGreen)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityIdentifier("connectedProtocolLabel")
                     }
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         HStack(spacing: 4) {
                             Image(systemName: "clock")
                                 .accessibilityHidden(true)
-                                .font(.caption2.weight(.semibold))
+                                .font(.caption2)
                             Text(durationText)
-                                .font(.system(.caption, design: .monospaced).weight(.medium))
+                                .font(.system(.caption2, design: .monospaced).weight(.medium))
                                 .lineLimit(1)
                         }
                         .accessibilityElement(children: .combine)
@@ -259,9 +286,9 @@ struct DashboardView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "dot.radiowaves.left.and.right")
                                 .accessibilityHidden(true)
-                                .font(.caption2.weight(.semibold))
+                                .font(.caption2)
                             Text(pingDisplayText)
-                                .font(.system(.caption, design: .monospaced).weight(.medium))
+                                .font(.system(.caption2, design: .monospaced).weight(.medium))
                                 .lineLimit(1)
                         }
                         .accessibilityElement(children: .combine)
@@ -272,7 +299,7 @@ struct DashboardView: View {
                                 Task { await refreshPing() }
                             } label: {
                                 Image(systemName: "arrow.clockwise")
-                                    .font(.caption2.weight(.semibold))
+                                    .font(.caption2)
                                     .accessibilityHidden(true)
                                     .rotationEffect(.degrees(pingRefreshing ? 360 : 0))
                                     .animation(
@@ -899,6 +926,10 @@ struct DashboardView: View {
     private var publicIPLabel: String {
         let ip = vpn.statistics.lastPublicIP
         if !ip.isEmpty { return ip }
+        if vpn.status != .connected,
+           let originIP = PublicIPAddress.normalized(vpn.statistics.originPublicIP ?? "") {
+            return originIP
+        }
         if vpn.status == .connected,
            SharedSettingsStore.shared.appSettings.proxyOnlyModeEnabled
             || vpn.statistics.proxyOnlyModeActive {
@@ -913,7 +944,46 @@ struct DashboardView: View {
             for: vpn.statistics.connectedTunnelProtocol
         )
         guard !display.isEmpty else { return nil }
-        return "\(L10n.t(.connectedProtocol)): \(display)"
+        return display
+    }
+
+    private var egressMapCoordinate: WorldMapCoordinate? {
+        if ProcessInfo.processInfo.arguments.contains("-UITestMapRoutePreview") {
+            return WorldMapCoordinate(latitude: 56.1304, longitude: -106.3468)
+        }
+        guard vpn.status == .connected,
+              PublicIPAddress.normalized(vpn.statistics.lastPublicIP) != nil,
+              let latitude = vpn.statistics.connectedLatitude,
+              let longitude = vpn.statistics.connectedLongitude,
+              (-90...90).contains(latitude),
+              (-180...180).contains(longitude) else { return nil }
+        return WorldMapCoordinate(latitude: latitude, longitude: longitude)
+    }
+
+    private var originMapCoordinate: WorldMapCoordinate? {
+        if ProcessInfo.processInfo.arguments.contains("-UITestMapRoutePreview") {
+            return WorldMapCoordinate(latitude: 35.6892, longitude: 51.3890)
+        }
+        return WorldMapLocationResolver.originCoordinate(for: vpn.statistics)
+    }
+
+    private var originCountryCode: String? {
+        if ProcessInfo.processInfo.arguments.contains("-UITestMapRoutePreview") {
+            return "IR"
+        }
+        return vpn.statistics.originCountryCode
+    }
+
+    private var destinationCountryCode: String? {
+        if ProcessInfo.processInfo.arguments.contains("-UITestMapRoutePreview") {
+            return "CA"
+        }
+        return vpn.statistics.connectedCountryCode
+    }
+
+    private var isMapConnectionVisible: Bool {
+        vpn.status == .connected
+            || ProcessInfo.processInfo.arguments.contains("-UITestMapRoutePreview")
     }
 
     private func refreshConfigFlag() {
@@ -952,12 +1022,14 @@ struct DashboardView: View {
         if connectingStartedAt == nil {
             connectingStartedAt = now
         }
-        let shouldShow = now - (connectingStartedAt ?? now)
-            >= RecoveryTimingDefaults.slowConnectionHintDelay
+        let hintDelay = selectedProtocol == .cdnFronting
+            ? RecoveryTimingDefaults.cdnSlowConnectionHintDelay
+            : RecoveryTimingDefaults.slowConnectionHintDelay
+        let shouldShow = now - (connectingStartedAt ?? now) >= hintDelay
         if shouldShow, !showSlowConnectionHelp {
             SharedLogger.shared.logRaw(
                 "SLOW_CONNECTION_HELP_SHOWN",
-                detail: "delay_s=\(Int(RecoveryTimingDefaults.slowConnectionHintDelay))"
+                detail: "delay_s=\(Int(hintDelay))"
             )
         }
         showSlowConnectionHelp = shouldShow

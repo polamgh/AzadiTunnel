@@ -20,8 +20,15 @@ enum PsiphonProtocolSets {
         "FRONTED-MEEK-CDN-QUIC-OSSH"
     ]
 
-    /// CDN fronting transport mode — `CDN_FRONTING_TUNNEL_PROTOCOLS` (3 protocols only).
+    /// CDN fronting transport mode — Shiro's complete three-protocol set.
     static let cdnFronting: [String] = PsiphonShiroCDNFrontingConfig.cdnFrontingModeProtocols
+
+    /// TCP-only fronting is attempted first on restrictive networks. QUIC remains available in
+    /// the final compatibility attempt instead of occupying aggressive workers on every attempt.
+    static let cdnFrontingTCP: [String] = [
+        "FRONTED-MEEK-CDN-OSSH",
+        "FRONTED-MEEK-CDN-HTTP-OSSH"
+    ]
 
     /// Conduit / in-proxy — `CONDUIT_TUNNEL_PROTOCOLS`.
     static let conduit: [String] = [
@@ -54,6 +61,14 @@ enum PsiphonProtocolSets {
     /// Expected `LimitTunnelProtocols` for unit checks / Scripts/verify-protocol-parity.py.
     static func expectedLimitJSON(for settings: AppSettings) -> [String]? {
         var limits = limits(for: settings.protocolSelection)
+        if settings.protocolSelection == .cdnFronting {
+            switch settings.cdnFrontingAttemptStrategy {
+            case .dynamicTCP, .staticTCP:
+                limits = cdnFrontingTCP
+            case .staticAll, nil:
+                limits = cdnFronting
+            }
+        }
         if settings.beastModeEnabled && settings.protocolSelection == .auto {
             limits = nil
         }

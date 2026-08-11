@@ -60,6 +60,7 @@ enum RecoveryTimingDefaults {
     nonisolated static let networkExtensionStartAcknowledgement: TimeInterval = 10
     nonisolated static let networkExtensionStartupStatusGrace: TimeInterval = 10
     nonisolated static let slowConnectionHintDelay: TimeInterval = 20
+    nonisolated static let cdnSlowConnectionHintDelay: TimeInterval = 35
     nonisolated static let maxRecoveryAttempts = 4
     nonisolated static let maxEgressCandidates = 2
 }

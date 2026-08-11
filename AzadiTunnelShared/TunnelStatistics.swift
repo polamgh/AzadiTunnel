@@ -76,6 +76,18 @@ struct TunnelStatistics: Codable, Equatable {
     var conduitStatusUpdatedAt: Date?
     var connectedCity: String = ""
     var connectedCountry: String = ""
+    var connectedCountryCode: String?
+    var connectedLatitude: Double?
+    var connectedLongitude: Double?
+    /// Public IP observed before the VPN starts. Optional fields keep decoding
+    /// compatible with statistics saved by older app versions.
+    var originPublicIP: String?
+    var originCity: String?
+    var originCountry: String?
+    var originCountryCode: String?
+    var originLatitude: Double?
+    var originLongitude: Double?
+    var originCapturedAt: Date?
     /// Legacy local SOCKS TCP relay sessions (packet-mode traffic is counted by Psiphon).
     var tcpRelaySessions: UInt64 = 0
     /// True when connected in Proxy Only mode (no full-device routing).
@@ -128,6 +140,9 @@ enum TunnelStatisticsStore {
         s.connectedServerRegion = ""
         s.connectedCity = ""
         s.connectedCountry = ""
+        s.connectedCountryCode = nil
+        s.connectedLatitude = nil
+        s.connectedLongitude = nil
         s.connectedTunnelProtocol = ""
         s.lastPublicIP = ""
         clearConduitStatus(on: &s)
@@ -245,6 +260,10 @@ enum TunnelStatisticsStore {
     static func setConnectedServerRegion(_ region: String) {
         var s = load()
         s.connectedServerRegion = region
+        let normalizedRegion = region.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if normalizedRegion.count == 2 {
+            s.connectedCountryCode = normalizedRegion
+        }
         let name = RegionDisplayNames.countryName(for: region)
         if s.connectedCountry.isEmpty, !name.isEmpty {
             s.connectedCountry = name
@@ -252,10 +271,48 @@ enum TunnelStatisticsStore {
         save(s)
     }
 
-    static func setEgressGeo(city: String, country: String) {
+    static func setEgressGeo(
+        city: String,
+        country: String,
+        countryCode: String,
+        latitude: Double?,
+        longitude: Double?
+    ) {
         var s = load()
         if !city.isEmpty { s.connectedCity = city }
         if !country.isEmpty { s.connectedCountry = country }
+        let normalizedCode = countryCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if normalizedCode.count == 2 { s.connectedCountryCode = normalizedCode }
+        if let latitude, let longitude,
+           (-90...90).contains(latitude), (-180...180).contains(longitude) {
+            s.connectedLatitude = latitude
+            s.connectedLongitude = longitude
+        }
+        save(s)
+    }
+
+    static func setOriginGeo(
+        ip: String,
+        city: String,
+        country: String,
+        countryCode: String,
+        latitude: Double,
+        longitude: Double
+    ) {
+        guard let normalizedIP = PublicIPAddress.normalized(ip),
+              (-90...90).contains(latitude),
+              (-180...180).contains(longitude) else { return }
+        var s = load()
+        s.originPublicIP = normalizedIP
+        s.originCity = city
+        s.originCountry = country
+        let normalizedCode = countryCode
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
+        s.originCountryCode = normalizedCode.count == 2 ? normalizedCode : nil
+        s.originLatitude = latitude
+        s.originLongitude = longitude
+        s.originCapturedAt = Date()
         save(s)
     }
 }

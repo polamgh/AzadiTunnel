@@ -104,6 +104,7 @@ struct SettingsView: View {
                 }
             }
             .onChange(of: settings.egressRegion) { _ in
+                SharedSettingsStore.shared.egressRegionUnavailable = false
                 persist("egress_region")
             }
             .accessibilityHint(Text(L10n.t(.settingsRegionHint)))
@@ -510,7 +511,7 @@ struct SettingsView: View {
 }
 
 enum PsiphonRegionList {
-    static let all = ["US", "CA", "GB", "DE", "FR", "NL", "CH", "SE", "JP", "SG", "AU", "IR", "AE", "IN", "BR", "ZA"]
+    static var all: [String] { PsiphonEgressRegionStore.knownRegions() }
 }
 
 enum SettingsLabels {

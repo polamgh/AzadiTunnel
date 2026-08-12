@@ -72,10 +72,15 @@ struct AzadiTunnelApp: App {
                 settings.fallbackTimeoutDirect = 120
             }
             let secureDnsModeRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSMode")
-            if secureDnsModeRaw != nil {
-                // Legacy UI-test invocations may still pass "off" or "dot". They are accepted
-                // as input for migration coverage, but the runtime setting is always DoH.
-                settings.secureDNSMode = .doh
+            if let secureDnsModeRaw {
+                switch SecureDNSMode(rawValue: secureDnsModeRaw) {
+                case .off:
+                    settings.secureDNSMode = .off
+                case .doh, .dot:
+                    settings.secureDNSMode = .doh
+                case .none:
+                    settings.secureDNSMode = .doh
+                }
             }
             let secureDnsProviderRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSProvider")
             if let secureDnsProviderRaw,

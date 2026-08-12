@@ -54,7 +54,9 @@ enum NoInternetRecoveryController {
 
         let runner = RecoveryAttemptRunner(operations: .init(
             applyTrial: { trial in
-                SharedSettingsStore.shared.applyRecoveryTrialSettings(trial)
+                var next = trial
+                next.egressRegion = SharedSettingsStore.shared.appSettings.egressRegion
+                SharedSettingsStore.shared.applyRecoveryTrialSettings(next)
             },
             restoreBaseline: { _ in
                 SharedSettingsStore.shared.clearRecoveryTrialSettings()

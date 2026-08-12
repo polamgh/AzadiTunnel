@@ -340,6 +340,7 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
             dict["PacketTunnelTransparentDNSIPv4Address"] = "10.0.0.1"
             dict["PacketTunnelTransparentDNSIPv6Address"] = "fd00::1"
         }
+        PsiphonDeviceOriginConfig.apply(to: &dict)
         let out = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         guard let text = String(data: out, encoding: .utf8) else {
             throw PsiphonConfigValidationError.invalidJSON
@@ -499,8 +500,8 @@ final class PsiphonTunnelAdapter: NSObject, PsiphonTunnelCoreProtocol, @unchecke
     }
 
     /// Full packet mode requires the generation-safe proxy readiness used by
-    /// mandatory in-tunnel DoH and the independently established packet
-    /// transport channel. Either signal may arrive first.
+    /// optional in-tunnel DoH (when enabled) and the independently established
+    /// packet transport channel. Either signal may arrive first.
     private func finishStartIfReady(
         generation callbackGeneration: UInt64,
         endpoints: PsiphonLocalProxyEndpoints
@@ -857,6 +858,10 @@ extension PsiphonTunnelAdapter: TunneledAppDelegate {
     @objc func onConnectedServerRegion(_ region: String) {
         SharedLogger.shared.logRaw("PSIPHON_REGION", detail: region)
         TunnelStatisticsStore.setConnectedServerRegion(region)
+    }
+
+    @objc func onAvailableEgressRegions(_ regions: [String]) {
+        PsiphonEgressRegionStore.updateAvailableRegions(regions)
     }
 
     @objc func onBytesTransferred(_ sent: Int64, _ received: Int64) {

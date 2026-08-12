@@ -19,11 +19,13 @@ struct SecureDNSSettingsView: View {
             Form {
                 noteSection
                 modeSection
-                providerSection
-                if settings.secureDNSProvider == .custom {
-                    customSection
+                if SecureDNSConfiguration.isActive(settings) {
+                    providerSection
+                    if settings.secureDNSProvider == .custom {
+                        customSection
+                    }
+                    testSection
                 }
-                testSection
                 if let warningText, !warningText.isEmpty {
                     warningSection(warningText)
                 }
@@ -147,7 +149,10 @@ struct SecureDNSSettingsView: View {
     }
 
     private var activeSelectionSummary: String {
-        "\(modeTitle(settings.secureDNSMode)) · \(providerLabel(settings.secureDNSProvider))"
+        if SecureDNSConfiguration.isActive(settings) {
+            return "\(modeTitle(settings.secureDNSMode)) · \(providerLabel(settings.secureDNSProvider))"
+        }
+        return modeTitle(.off)
     }
 
     private func modeOptionRow(_ mode: SecureDNSMode) -> some View {

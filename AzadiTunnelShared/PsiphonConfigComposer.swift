@@ -41,6 +41,7 @@ enum PsiphonConfigComposer {
         }
 
         PsiphonConduitConfig.apply(to: &dict, settings: settings)
+        applyAndroidTacticsPolicy(to: &dict, settings: settings)
 
         let out = try JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys])
         guard let text = String(data: out, encoding: .utf8) else {
@@ -68,6 +69,16 @@ enum PsiphonConfigComposer {
             return limits.joined(separator: ",")
         }
         return "all"
+    }
+
+    /// Shiro Android disables tactics for explicit direct and CDN-fronting modes only.
+    private static func applyAndroidTacticsPolicy(to dict: inout [String: Any], settings: AppSettings) {
+        switch settings.protocolSelection {
+        case .direct, .cdnFronting:
+            dict["DisableTactics"] = true
+        case .auto, .conduit:
+            dict.removeValue(forKey: "DisableTactics")
+        }
     }
 }
 

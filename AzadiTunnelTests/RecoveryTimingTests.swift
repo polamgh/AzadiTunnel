@@ -55,34 +55,24 @@ final class RecoveryTimingTests: XCTestCase {
         )
     }
 
-    func testExplicitCDNRotatesDynamicAndStaticRoutesBeforeOtherTransports() {
+    func testExplicitCDNIsSingleStaticAttemptLikeAndroid() {
         var settings = AppSettings()
         settings.protocolSelection = .cdnFronting
         settings.fallbackTimeoutCDN = 120
 
         let steps = FallbackChainController.steps(for: .cdnFronting, settings: settings)
 
-        XCTAssertGreaterThanOrEqual(steps.count, 5)
-        XCTAssertEqual(Array(steps.prefix(3).map(\.attemptID)), [
-            "cdn_dynamic_tcp",
-            "cdn_static_tcp",
-            "cdn_static_all"
-        ])
-        XCTAssertEqual(Array(steps.prefix(3).map(\.transport)), [.cdn, .cdn, .cdn])
-        XCTAssertEqual(Array(steps.prefix(3).compactMap(\.cdnAttemptStrategy)), [
-            .dynamicTCP,
-            .staticTCP,
-            .staticAll
-        ])
-        XCTAssertEqual(steps[0].timeoutSeconds, 12)
-        XCTAssertEqual(steps[0].minimumTimeoutSeconds, 12)
-        XCTAssertEqual(steps[1].timeoutSeconds, 18)
-        XCTAssertEqual(steps[1].minimumTimeoutSeconds, 18)
-        XCTAssertEqual(steps[3].transport, .autoBeast)
-        XCTAssertEqual(steps[4].transport, .direct)
+        XCTAssertGreaterThanOrEqual(steps.count, 3)
+        XCTAssertEqual(Array(steps.prefix(3).map(\.transport)), [.cdn, .autoBeast, .direct])
+        XCTAssertEqual(steps[0].attemptID, FallbackStep.cdn.rawValue)
+        XCTAssertEqual(steps[0].cdnAttemptStrategy, .staticAll)
+        XCTAssertEqual(steps[0].timeoutSeconds, 120)
+        XCTAssertEqual(steps.filter { $0.transport == .cdn }.count, 1)
+        XCTAssertNil(steps[1].cdnAttemptStrategy)
+        XCTAssertNil(steps[2].cdnAttemptStrategy)
     }
 
-    func testCDNRecoveryStrategiesComposeDistinctRoutesAndProtocolSets() throws {
+    func testCDNComposeUsesAndroidClassicFrontedProtocolsAndStaticOverrides() throws {
         func dictionary(for settings: AppSettings) throws -> [String: Any] {
             let json = try PsiphonConfigComposer.compose(baseJSON: "{}", settings: settings)
             return try XCTUnwrap(
@@ -92,28 +82,24 @@ final class RecoveryTimingTests: XCTestCase {
 
         var settings = AppSettings()
         settings.protocolSelection = .cdnFronting
+        settings.cdnFrontingAttemptStrategy = .staticAll
+
+        let composed = try dictionary(for: settings)
+        XCTAssertFalse((composed["FrontedMeekDialOverrides"] as? [[String: Any]] ?? []).isEmpty)
+        XCTAssertEqual(
+            composed["LimitTunnelProtocols"] as? [String],
+            [
+                "FRONTED-MEEK-OSSH",
+                "FRONTED-MEEK-HTTP-OSSH",
+                "FRONTED-MEEK-QUIC-OSSH"
+            ]
+        )
 
         settings.cdnFrontingAttemptStrategy = .dynamicTCP
         let dynamic = try dictionary(for: settings)
         XCTAssertNil(dynamic["FrontedMeekDialOverrides"])
         XCTAssertEqual(
             dynamic["LimitTunnelProtocols"] as? [String],
-            PsiphonProtocolSets.cdnFrontingTCP
-        )
-
-        settings.cdnFrontingAttemptStrategy = .staticTCP
-        let staticTCP = try dictionary(for: settings)
-        XCTAssertFalse((staticTCP["FrontedMeekDialOverrides"] as? [[String: Any]] ?? []).isEmpty)
-        XCTAssertEqual(
-            staticTCP["LimitTunnelProtocols"] as? [String],
-            PsiphonProtocolSets.cdnFrontingTCP
-        )
-
-        settings.cdnFrontingAttemptStrategy = .staticAll
-        let staticAll = try dictionary(for: settings)
-        XCTAssertFalse((staticAll["FrontedMeekDialOverrides"] as? [[String: Any]] ?? []).isEmpty)
-        XCTAssertEqual(
-            staticAll["LimitTunnelProtocols"] as? [String],
             PsiphonProtocolSets.cdnFronting
         )
     }
@@ -154,9 +140,45 @@ final class RecoveryTimingTests: XCTestCase {
             XCTFail("expected bounded exhaustion")
         }
         XCTAssertEqual(clock.value, 75, accuracy: 0.0001)
-        XCTAssertTrue(timeouts.allSatisfy { $0 <= RecoveryTimingDefaults.perAttemptBudget })
         XCTAssertEqual(timeouts, [30, 30, 9])
         XCTAssertEqual(connects, 3)
+    }
+
+    func testConfiguredAttemptTimeoutIsHonoredWithoutHardCap() async {
+        let clock = FakeClock()
+        var timeouts: [TimeInterval] = []
+        let baseline = AppSettings()
+        var trial = baseline
+        trial.protocolSelection = .cdnFronting
+        let attempts = [
+            attempt(id: "cdn", settings: trial, timeout: 120, minimumTimeout: 30)
+        ]
+        let runner = RecoveryAttemptRunner(operations: .init(
+            applyTrial: { _ in },
+            restoreBaseline: { _ in },
+            disconnect: {},
+            connect: {},
+            verify: { _, timeout, budget in
+                timeouts.append(timeout)
+                try await budget.sleep(timeout)
+                return true
+            },
+            persistWinner: { _ in }
+        ))
+
+        let result = await runner.run(
+            attempts: attempts,
+            baseline: baseline,
+            budget: RecoveryBudget(duration: 200, clock: clock.clock),
+            maxAttempts: 1
+        )
+
+        guard case .succeeded = result else {
+            return XCTFail("expected success with full configured timeout")
+        }
+        // settle(2) + verify(120); must not be capped at the old 40s hard limit.
+        XCTAssertEqual(timeouts, [120])
+        XCTAssertEqual(clock.value, 122, accuracy: 0.0001)
     }
 
     func testUserCancellationDuringVerificationStopsRecoveryWithoutReconnectOrPersist() async {

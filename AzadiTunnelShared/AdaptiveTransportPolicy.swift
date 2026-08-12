@@ -71,6 +71,16 @@ enum AdaptiveTransportPolicy {
         }
     }
 
+    /// Shiro Android applies CDN fronting hints for auto, direct, and explicit CDN modes.
+    static func includesCdnFrontingHints(for selection: Selection) -> Bool {
+        switch selection {
+        case .auto, .direct, .cdnFronting:
+            return true
+        case .conduit:
+            return false
+        }
+    }
+
     /// Static CDN dial overrides and scan hints are only valid for an explicit CDN attempt.
     static func usesStaticCDNOverrides(for selection: Selection) -> Bool {
         selection == .cdnFronting
@@ -79,6 +89,11 @@ enum AdaptiveTransportPolicy {
     static func usesStaticCDNOverrides(for rawValue: String) -> Bool {
         guard let selection = selection(for: rawValue) else { return false }
         return usesStaticCDNOverrides(for: selection)
+    }
+
+    static func includesCdnFrontingHints(for rawValue: String) -> Bool {
+        guard let selection = selection(for: rawValue) else { return false }
+        return includesCdnFrontingHints(for: selection)
     }
 
     /// The app never disables Psiphon tactics for an adaptive transport attempt.

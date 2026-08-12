@@ -74,8 +74,11 @@ enum SecureDNSResolver {
         socksHost: String,
         socksPort: Int
     ) async throws -> Result {
-        // Secure DNS is mandatory after migration. The legacy `.off` value is decoded only long
-        // enough for SharedSettingsStore to rewrite it to DoH; it never opens a cleartext path.
+        // Secure DNS off is a valid user choice (Psiphon transparent DNS). Callers must not
+        // invoke resolve when inactive; this guard is defense in depth only.
+        guard SecureDNSConfiguration.isActive(settings) else {
+            throw SecureDNSTransportError.noResolver
+        }
         guard socksPort > 0 else { throw SecureDNSTransportError.noProxy }
 
         let queryMessage: SecureDNSWire.Message

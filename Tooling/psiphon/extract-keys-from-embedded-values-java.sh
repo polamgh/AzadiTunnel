@@ -25,6 +25,9 @@ export PSIPHON_REMOTE_SERVER_LIST_SIGNATURE_PUBLIC_KEY="$(
 export PSIPHON_OBFUSCATED_SERVER_LIST_ROOT_URLS_JSON="$(
   sed -n 's/.*OBFUSCATED_SERVER_LIST_ROOT_URLS_JSON = "\(.*\)".*/\1/p' "$JAVA_FILE" | head -1 | sed 's/\\"/"/g'
 )"
+export PSIPHON_ADDITIONAL_PARAMETERS="$(
+  sed -n 's/.*ADDITIONAL_PARAMETERS = "\(.*\)".*/\1/p' "$JAVA_FILE" | head -1 | sed 's/\\"/"/g'
+)"
 
 if [[ -z "$PSIPHON_SERVER_ENTRY_SIGNATURE_PUBLIC_KEY" ]]; then
   echo "No SERVER_ENTRY_SIGNATURE_PUBLIC_KEY in $JAVA_FILE — build Shiro with distributor secrets first." >&2

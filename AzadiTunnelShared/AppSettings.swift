@@ -76,15 +76,18 @@ struct AppSettings: Codable, Equatable {
     /// break general internet / public-IP checks in this architecture (system proxy carries them).
     var bypassStrictModeEnabled: Bool = false
 
-    /// RFC 8484 DoH for all intercepted tunnel DNS. DoH is mandatory; legacy `.off`/`.dot`
-    /// values are decoded only long enough to migrate old App Group settings.
-    var secureDNSMode: SecureDNSMode = .doh
+    /// Optional RFC 8484 DoH for intercepted tunnel DNS. Default is off so DNS
+    /// uses Psiphon transparent DNS.
+    var secureDNSMode: SecureDNSMode = .off
     var secureDNSProvider: SecureDNSProvider = .cloudflare
     var customDoHURL: String = ""
-    /// Legacy DoT host retained only so old settings can decode before migration to DoH.
+    /// Legacy DoT host retained only so old settings can decode; cleared on migration.
     var customDoTHost: String = ""
-    /// Legacy compatibility field. DoH is always fail-closed; no cleartext fallback exists.
+    /// When DoH is on, failures stay fail-closed (no cleartext DNS fallback).
     var blockCleartextDNS: Bool = true
+    /// One-shot: existing installs that had mandatory DoH are reset to Off once.
+    /// After this flag is true, the user's Off/DoH choice is preserved.
+    var hasMigratedSecureDNSOptionalDefault: Bool = false
 
     /// Explicit compatibility toggle. Secure DNS never changes this user's choice.
     var messagingAppsCompatibilityModeEnabled: Bool = false
@@ -126,7 +129,8 @@ struct AppSettings: Codable, Equatable {
     }
 
     enum CDNFrontingAttemptStrategy: String, Codable {
-        /// Current signed Psiphon fronting routes, with UDP/QUIC excluded for restrictive networks.
+        /// Core-managed CDN scan without static dial overrides. Used as an iOS recovery
+        /// fallback after Shiro-compatible static edges fail activation.
         case dynamicTCP = "dynamic_tcp"
         /// Shiro-compatible built-in/static edge overrides, with UDP/QUIC excluded.
         case staticTCP = "static_tcp"
@@ -166,6 +170,8 @@ struct AppSettings: Codable, Equatable {
         fresh.hasCompletedOnboarding = from.hasCompletedOnboarding
         fresh.hasChosenLanguage = from.hasChosenLanguage
         fresh.preferredLanguage = from.preferredLanguage
+        // Factory reset already uses the optional-default (Off); skip the one-shot migration.
+        fresh.hasMigratedSecureDNSOptionalDefault = true
         return fresh
     }
 }

@@ -3,9 +3,10 @@ import Foundation
 import Network
 import NetworkExtension
 
-/// Intercepts IPv4 UDP/53 and answers it exclusively with full RFC 8484 DoH responses.
-/// Invalid, disabled, timed-out, and cancelled resolver paths fail closed; no DNS packet is
-/// handed to the native packet engine or a system resolver.
+/// Intercepts IPv4 UDP/53 when Secure DNS (DoH) is enabled and answers with
+/// RFC 8484 DoH responses. When Secure DNS is off, returns false so Psiphon
+/// transparent DNS handles the query (AAAA suppression may still claim packets).
+/// Invalid, timed-out, and cancelled DoH paths fail closed.
 enum TunnelDnsForwarder {
     private static let queue = DispatchQueue(
         label: "com.polamgh.ali.AzadiTunnel.dns",
@@ -37,11 +38,17 @@ enum TunnelDnsForwarder {
         socksPort: Int,
         packetEngineCapabilities: PacketEngineCapabilities = .ipv4Only
     ) -> Bool {
-        // Claim malformed UDP/53 packets too. Returning false here would hand an unparseable DNS
-        // packet to the native packet engine, which would create a direct cleartext escape path.
         guard isDNSDestination(packet) else { return false }
-        guard let parsed = parseDnsQuery(packet: packet) else { return true }
+
+        let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
+        let secureDNSActive = SecureDNSConfiguration.isActive(settings)
+
+        // When DoH is off, only claim packets we must rewrite (AAAA suppression). Everything else
+        // returns false so Psiphon transparent DNS handles the query.
+        // When DoH is on, also claim malformed UDP/53 so nothing escapes cleartext.
+        guard let parsed = parseDnsQuery(packet: packet) else { return secureDNSActive }
         guard let question = parseQuestion(parsed.dnsPayload) else {
+            guard secureDNSActive else { return false }
             if let formerr = SecureDNSWire.errorResponse(for: parsed.dnsPayload, rcode: 1) {
                 writeResponse(
                     packet: parsed,
@@ -66,7 +73,8 @@ enum TunnelDnsForwarder {
             return true
         }
 
-        let settings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
+        guard secureDNSActive else { return false }
+
         let requestID = UUID()
         let task = Task { [settings] in
             do {
@@ -86,9 +94,7 @@ enum TunnelDnsForwarder {
             } catch is CancellationError {
                 return
             } catch {
-                if SecureDNSConfiguration.isActive(settings) {
-                    SharedSettingsStore.shared.secureDNSWarning = "blocked"
-                }
+                SharedSettingsStore.shared.secureDNSWarning = "blocked"
                 guard let servfail = SecureDNSWire.errorResponse(for: parsed.dnsPayload, rcode: 2) else {
                     return
                 }

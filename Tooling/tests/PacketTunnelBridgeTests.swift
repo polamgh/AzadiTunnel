@@ -126,7 +126,7 @@ struct PacketTunnelBridgeTests {
             packetTransportReady: true,
             hasSocks: false,
             coreConnected: true
-        ), "mandatory in-tunnel DNS requires SOCKS readiness")
+        ), "optional in-tunnel DoH requires SOCKS readiness when Secure DNS is enabled")
         require(!PsiphonPacketTunnelCapabilities.isReadyForStart(
             packetMode: true,
             hasPacketProvider: true,

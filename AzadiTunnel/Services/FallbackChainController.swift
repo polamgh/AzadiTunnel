@@ -45,7 +45,9 @@ enum FallbackChainController {
             for: policySelection,
             includePublicConduit: SharedSettingsStore.shared.conduitConnectAllowed
         )
-        let standardSteps = candidates.map { candidate in
+        // One Android-like attempt per transport. Explicit CDN is a single 120s
+        // static-dial shot (not short static/dynamic multi-shots that burn budget).
+        return candidates.map { candidate in
             let timeout: TimeInterval
             switch candidate.transport {
             case .cdn:
@@ -65,51 +67,10 @@ enum FallbackChainController {
                 protocolSelection: AppSettings.ProtocolSelection(rawValue: candidate.selection.rawValue) ?? .auto,
                 beast: candidate.beast,
                 timeoutSeconds: timeout,
-                conduitMode: candidate.transport == .conduitPublic ? .publicOnly : nil
+                conduitMode: candidate.transport == .conduitPublic ? .publicOnly : nil,
+                cdnAttemptStrategy: candidate.transport == .cdn ? .staticAll : nil
             )
         }
-
-        guard selection == .cdnFronting,
-              let first = standardSteps.first,
-              first.transport == .cdn else {
-            return standardSteps
-        }
-
-        // A fixed edge can complete TLS/SSH and still fail Psiphon's activation handshake, as
-        // seen on restrictive networks. Rotate the route strategy automatically instead of
-        // requiring the user to toggle Region to perturb candidate ordering.
-        let dynamicTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 12)
-        let staticTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 18)
-        let cdnSteps = [
-            Step(
-                attemptID: "cdn_dynamic_tcp",
-                transport: .cdn,
-                protocolSelection: .cdnFronting,
-                beast: true,
-                timeoutSeconds: dynamicTimeout,
-                minimumTimeoutSeconds: dynamicTimeout,
-                cdnAttemptStrategy: .dynamicTCP
-            ),
-            Step(
-                attemptID: "cdn_static_tcp",
-                transport: .cdn,
-                protocolSelection: .cdnFronting,
-                beast: true,
-                timeoutSeconds: staticTimeout,
-                minimumTimeoutSeconds: staticTimeout,
-                cdnAttemptStrategy: .staticTCP
-            ),
-            Step(
-                attemptID: "cdn_static_all",
-                transport: .cdn,
-                protocolSelection: .cdnFronting,
-                beast: true,
-                timeoutSeconds: first.timeoutSeconds,
-                minimumTimeoutSeconds: first.minimumTimeoutSeconds,
-                cdnAttemptStrategy: .staticAll
-            )
-        ]
-        return cdnSteps + Array(standardSteps.dropFirst())
     }
 
     static func shouldUseChain(for selection: AppSettings.ProtocolSelection) -> Bool {
@@ -193,7 +154,11 @@ enum FallbackChainController {
 
         let runner = RecoveryAttemptRunner(operations: .init(
             applyTrial: { trial in
-                SharedSettingsStore.shared.applyRecoveryTrialSettings(trial)
+                // Keep the user's current egress choice (or Auto after an unavailable-region
+                // reset) even though the fallback chain snapshotted settings at start.
+                var next = trial
+                next.egressRegion = SharedSettingsStore.shared.appSettings.egressRegion
+                SharedSettingsStore.shared.applyRecoveryTrialSettings(next)
             },
             restoreBaseline: { _ in
                 SharedSettingsStore.shared.clearRecoveryTrialSettings()

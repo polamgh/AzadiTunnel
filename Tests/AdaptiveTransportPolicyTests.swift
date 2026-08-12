@@ -38,6 +38,11 @@ final class AdaptiveTransportPolicyTests: XCTestCase {
     }
 
     func testStaticCDNOverridesAreScopedToExplicitCDN() {
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .auto))
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .direct))
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .cdnFronting))
+        XCTAssertFalse(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .conduit))
+
         XCTAssertFalse(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .auto))
         XCTAssertFalse(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .direct))
         XCTAssertTrue(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .cdnFronting))

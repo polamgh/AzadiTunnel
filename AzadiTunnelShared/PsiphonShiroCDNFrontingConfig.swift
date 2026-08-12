@@ -3,10 +3,11 @@ import Foundation
 /// Shiro `TunnelManager.putCdnFrontingConfig` / `makeCdnFrontingDialOverrides` / `makeCdnFrontingScanSpec` parity.
 enum PsiphonShiroCDNFrontingConfig {
     /// Shiro `CDN_FRONTING_TUNNEL_PROTOCOLS` (cdn_fronting mode only).
+    /// Classic fronted meek — not the `FRONTED-MEEK-CDN-*` family.
     static let cdnFrontingModeProtocols = [
-        "FRONTED-MEEK-CDN-OSSH",
-        "FRONTED-MEEK-CDN-HTTP-OSSH",
-        "FRONTED-MEEK-CDN-QUIC-OSSH"
+        "FRONTED-MEEK-OSSH",
+        "FRONTED-MEEK-HTTP-OSSH",
+        "FRONTED-MEEK-QUIC-OSSH"
     ]
 
     /// Built-in Akamai/Fastly edge IPs from Shiro `TunnelManager.makeCdnFrontingDialOverrides` (public Java).
@@ -25,13 +26,10 @@ enum PsiphonShiroCDNFrontingConfig {
     private static let bundledBaseName = "cdn-fronting"
     private static let bundledLocalName = "cdn-fronting.local"
 
-    /// Applies static CDN fronting hints only for an explicit CDN-fronting attempt.
-    ///
-    /// Auto and Direct must leave Psiphon's dynamic tactics/server selection in control. Applying
-    /// these overrides to either mode would force a static edge/SNI at probability 1.0 and make
-    /// the adaptive fallback less useful on networks whose working edge changes.
+    /// Shiro `TunnelManager.putCdnFrontingConfig` applies CDN hints for auto, direct, and
+    /// explicit CDN-fronting modes while leaving tactics enabled for auto.
     static func apply(to dict: inout [String: Any], settings: AppSettings) {
-        guard AdaptiveTransportPolicy.usesStaticCDNOverrides(for: settings.protocolSelection.rawValue) else {
+        guard AdaptiveTransportPolicy.includesCdnFrontingHints(for: settings.protocolSelection.rawValue) else {
             removeCdnKeys(from: &dict)
             return
         }
@@ -41,8 +39,6 @@ enum PsiphonShiroCDNFrontingConfig {
             dict["FrontedMeekDialOverrides"] = makeDialOverrides(customSni: customSni)
             dict["FrontedMeekDialOverridesProbability"] = 1.0
         } else {
-            // Prefer Psiphon's managed CDN scan first. It tracks successful and failed routes and
-            // includes a much broader edge/SNI corpus than the app's fixed legacy override list.
             dict.removeValue(forKey: "FrontedMeekDialOverrides")
             dict.removeValue(forKey: "FrontedMeekDialOverridesProbability")
         }
@@ -60,12 +56,11 @@ enum PsiphonShiroCDNFrontingConfig {
             dict.removeValue(forKey: "FrontedMeekCDNScanSpec")
         }
 
-        // CDN fronting still benefits from dynamic Psiphon tactics and signed server data.
         dict.removeValue(forKey: "DisableTactics")
     }
 
     static func enablesCdnFrontingBlock(_ selection: AppSettings.ProtocolSelection) -> Bool {
-        AdaptiveTransportPolicy.usesStaticCDNOverrides(for: selection.rawValue)
+        AdaptiveTransportPolicy.includesCdnFrontingHints(for: selection.rawValue)
     }
 
     static func logSummary(settings: AppSettings, composedJSON: String) -> String {
@@ -96,20 +91,12 @@ enum PsiphonShiroCDNFrontingConfig {
     }
 
     private static func usesStaticDialOverrides(settings: AppSettings) -> Bool {
-        switch settings.cdnFrontingAttemptStrategy {
-        case .dynamicTCP:
+        // Android `putCdnFrontingConfig` always seeds `FrontedMeekDialOverrides`.
+        // Keep `dynamicTCP` only as an explicit debug/recovery override.
+        if settings.cdnFrontingAttemptStrategy == .dynamicTCP {
             return false
-        case .staticTCP, .staticAll:
-            return true
-        case nil:
-            // A normal CDN connect without user-provided routes starts from Psiphon's managed
-            // scan. Explicit custom routes remain authoritative.
-            let extras = loadBundledExtras()
-            return !parseIPList(settings.cdnFrontingCustomIpList).isEmpty
-                || !parseSNIList(settings.cdnFrontingCustomSni).isEmpty
-                || !extras.extraEdgeIPs.isEmpty
-                || !extras.extraSniHostnames.isEmpty
         }
+        return true
     }
 
     // MARK: - Diagnostics (Shiro TunnelManager notice handlers)

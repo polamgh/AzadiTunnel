@@ -48,11 +48,12 @@ struct RecoveryBudget {
 }
 
 enum RecoveryTimingDefaults {
-    // Iranian mobile networks often need substantially longer for fronted TLS,
-    // tactics, and broker negotiation than an unrestricted network. Preserve
-    // enough time for all four serial transports without overlapping engines.
-    nonisolated static let overallBudget: TimeInterval = 180
-    nonisolated static let perAttemptBudget: TimeInterval = 40
+    // Match Shiro Android: ~120s per transport step. Overall covers Auto → CDN →
+    // Direct (+ optional public Conduit) without cutting paths that still succeed
+    // on Android. Per-attempt timeout comes from AppSettings; this constant is
+    // only a documented default / test reference, not a hard runner ceiling.
+    nonisolated static let overallBudget: TimeInterval = 480
+    nonisolated static let perAttemptBudget: TimeInterval = 120
     nonisolated static let minimumAttemptBudget: TimeInterval = 30
     nonisolated static let disconnectSettle: TimeInterval = 2.0
     nonisolated static let connectivityPoll: TimeInterval = 1

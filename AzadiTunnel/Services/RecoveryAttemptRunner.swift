@@ -174,11 +174,11 @@ struct RecoveryAttemptRunner {
                 return isCancelled ? .cancelled : .exhausted
             }
 
-            let timeout = min(
-                RecoveryTimingDefaults.perAttemptBudget,
-                max(attempt.minimumTimeoutSeconds, attempt.timeoutSeconds),
-                budget.remaining
-            )
+            // Honor the step's configured timeout (Android ≈120s). Only the
+            // remaining overall budget may shorten it — never a hard per-attempt
+            // ceiling below the settings value.
+            let configured = max(attempt.minimumTimeoutSeconds, attempt.timeoutSeconds)
+            let timeout = min(configured, budget.remaining)
             guard timeout > 0 else {
                 operations.attemptFinished(attemptNumber, attempt, false)
                 await restoreActiveTrial()

@@ -18,7 +18,7 @@ if [[ ! -f "$APK_PATH" ]]; then
   curl -fsSL -o "$APK_PATH" "$APK_URL"
 fi
 
-export APK_PATH BUNDLED
+export APK_PATH BUNDLED ROOT="${ROOT}"
 python3 <<'PY'
 import base64
 import json
@@ -99,8 +99,86 @@ if compartment_id:
 
 config_path = bundled / "psiphon-config.json"
 entries_path = bundled / "psiphon-embedded-server-entries.txt"
+local_config_path = bundled / "psiphon-config.local.json"
+remote_urls_path = Path(os.environ["ROOT"]) / "Tooling/psiphon/remote-server-list-urls.json"
 config_path.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 entries_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+# Distributor keys embedded in release APK dex (Shiro EmbeddedValues parity).
+known_entry_sig = b"sHuUVTWaRyh5pZwy4UguSgkwmBe0EHtJJkoF5WrxmvA="
+entry_sig = known_entry_sig.decode() if known_entry_sig in dex else ""
+if not entry_sig:
+    for raw in re.findall(rb"[A-Za-z0-9+/]{43}=", dex):
+        text = raw.decode()
+        if text.startswith("sHu") or text.startswith("MIIC"):
+            entry_sig = text
+            break
+
+remote_list_sig = ""
+for candidate in (
+    b"szhGm8lccoc5MZr8kfE0uxMgsxz4er68iCID+rsCAQM=",
+    b"HBkdgxkioPJ47j8nXxydXPBKXcnCruQ4ICEmrsECAQM=",
+):
+    if candidate in dex:
+        remote_list_sig = candidate.decode()
+        break
+
+exchange_key = ""
+for candidate in (b"HBkdgxkioPJ47j8nXxydXPBKXcnCruQ4ICEmrsECAQM=",):
+    if candidate in dex and candidate.decode() != remote_list_sig:
+        exchange_key = candidate.decode()
+
+s3_roots = [
+    "https://s3.amazonaws.com/psiphon/web/yttm-zeis-pjjd/",
+    "https://s3.amazonaws.com/psiphon/web/h861-azv0-6p98/",
+    "https://s3.amazonaws.com/psiphon/web/mjr4-p23r-puwl/",
+]
+remote_urls = []
+for root in s3_roots:
+    for suffix in ("server_list_compressed", "server_list"):
+        url = root + suffix
+        remote_urls.append(
+            {
+                "URL": base64.b64encode(url.encode()).decode(),
+                "OnlyAfterAttempts": 0,
+                "SkipVerify": False,
+            }
+        )
+obf_roots = []
+for root in s3_roots:
+    url = root + "osl"
+    obf_roots.append(
+        {
+            "URL": base64.b64encode(url.encode()).decode(),
+            "OnlyAfterAttempts": 0,
+            "SkipVerify": False,
+        }
+    )
+
+local_config = {"ClientVersion": "453"}
+if entry_sig:
+    local_config["ServerEntrySignaturePublicKey"] = entry_sig
+if exchange_key:
+    local_config["ExchangeObfuscationKey"] = exchange_key
+if remote_urls:
+    local_config["RemoteServerListURLs"] = remote_urls
+if remote_list_sig:
+    local_config["RemoteServerListSignaturePublicKey"] = remote_list_sig
+if obf_roots:
+    local_config["ObfuscatedServerListRootURLs"] = obf_roots
+
+if local_config.get("ServerEntrySignaturePublicKey"):
+    local_config_path.write_text(json.dumps(local_config, indent=2) + "\n", encoding="utf-8")
+    print(f"Wrote {local_config_path}")
+    print(f"  ServerEntrySignaturePublicKey={'yes' if entry_sig else 'no'}")
+    print(f"  RemoteServerListURLs={len(remote_urls)}")
+    print(f"  RemoteServerListSignaturePublicKey={'yes' if remote_list_sig else 'no'}")
+else:
+    print("WARN: Could not extract ServerEntrySignaturePublicKey — run merge-shiro-distributor-keys.sh with CI secrets")
+
+remote_urls_path.parent.mkdir(parents=True, exist_ok=True)
+remote_urls_path.write_text(json.dumps(remote_urls, indent=2) + "\n", encoding="utf-8")
+print(f"Wrote {remote_urls_path} ({len(remote_urls)} URLs)")
 
 print(f"Wrote {config_path}")
 print(f"  PropagationChannelId={propagation_id}")

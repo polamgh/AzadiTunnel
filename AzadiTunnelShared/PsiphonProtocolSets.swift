@@ -2,7 +2,7 @@ import Foundation
 
 /// Tunnel protocol names aligned with Shiro Khorshid Android `TunnelManager.java`.
 enum PsiphonProtocolSets {
-    /// Direct (non-fronted, non-in-proxy) — `DIRECT_TUNNEL_PROTOCOLS` subset used for direct mode.
+    /// Direct — Android `DIRECT_TUNNEL_PROTOCOLS` (classic fronted meek only; no CDN-family).
     static let direct: [String] = [
         "SSH",
         "OSSH",
@@ -13,24 +13,14 @@ enum PsiphonProtocolSets {
         "QUIC-OSSH",
         "SHADOWSOCKS-OSSH",
         "FRONTED-MEEK-OSSH",
-        "FRONTED-MEEK-CDN-OSSH",
         "FRONTED-MEEK-HTTP-OSSH",
-        "FRONTED-MEEK-CDN-HTTP-OSSH",
-        "FRONTED-MEEK-QUIC-OSSH",
-        "FRONTED-MEEK-CDN-QUIC-OSSH"
+        "FRONTED-MEEK-QUIC-OSSH"
     ]
 
-    /// CDN fronting transport mode — Shiro's complete three-protocol set.
+    /// CDN fronting — Android `CDN_FRONTING_TUNNEL_PROTOCOLS`.
     static let cdnFronting: [String] = PsiphonShiroCDNFrontingConfig.cdnFrontingModeProtocols
 
-    /// TCP-only fronting is attempted first on restrictive networks. QUIC remains available in
-    /// the final compatibility attempt instead of occupying aggressive workers on every attempt.
-    static let cdnFrontingTCP: [String] = [
-        "FRONTED-MEEK-CDN-OSSH",
-        "FRONTED-MEEK-CDN-HTTP-OSSH"
-    ]
-
-    /// Conduit / in-proxy — `CONDUIT_TUNNEL_PROTOCOLS`.
+    /// Conduit / in-proxy — Android `CONDUIT_TUNNEL_PROTOCOLS`.
     static let conduit: [String] = [
         "INPROXY-WEBRTC-SSH",
         "INPROXY-WEBRTC-OSSH",
@@ -60,18 +50,9 @@ enum PsiphonProtocolSets {
 
     /// Expected `LimitTunnelProtocols` for unit checks / Scripts/verify-protocol-parity.py.
     static func expectedLimitJSON(for settings: AppSettings) -> [String]? {
-        var limits = limits(for: settings.protocolSelection)
-        if settings.protocolSelection == .cdnFronting {
-            switch settings.cdnFrontingAttemptStrategy {
-            case .dynamicTCP, .staticTCP:
-                limits = cdnFrontingTCP
-            case .staticAll, nil:
-                limits = cdnFronting
-            }
-        }
         if settings.beastModeEnabled && settings.protocolSelection == .auto {
-            limits = nil
+            return nil
         }
-        return limits
+        return limits(for: settings.protocolSelection)
     }
 }

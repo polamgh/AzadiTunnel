@@ -200,6 +200,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     self?.handlePacketBridgeFailure(error)
                 }
                 self.packetBridge = bridge
+                SharedLogger.shared.logRaw(
+                    "PSIPHON_DEVICE_ORIGIN",
+                    detail: PsiphonDeviceOriginConfig.logSummary()
+                )
                 try await psiphonEngine.start(
                     configJSON: configJSON,
                     serverEntriesPath: entriesPath,
@@ -238,7 +242,10 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 try Task.checkCancellation()
 
                 if !proxyOnly {
-                    SecureDNSConfiguration.logStartupStatus(SharedSettingsStore.shared.tunnelEffectiveAppSettings)
+                    let secureDnsSettings = SharedSettingsStore.shared.tunnelEffectiveAppSettings
+                    SecureDNSConfiguration.logStartupStatus(secureDnsSettings)
+                    // Always install the callback so AAAA suppression still works when DoH is off;
+                    // inactive mode returns false for normal queries and uses Psiphon transparent DNS.
                     bridge?.setDNSHandler { [weak self] packet, protocolNumber in
                         guard let self else { return true }
                         let dnsEndpoints = self.engine?.localProxyEndpoints
@@ -881,18 +888,16 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
         }
 
         // IPv4 UDP/53 is intercepted by TunnelDnsForwarder when Secure DNS is
-        // active; Psiphon's native packet transport handles the core DNS path.
+        // active; otherwise Psiphon transparent DNS answers the advertised resolver.
         let tunnelSettings = store.tunnelEffectiveAppSettings
         let dnsServers = SecureDNSConfiguration.advertisedDnsServers(for: tunnelSettings)
         let dns = NEDNSSettings(servers: dnsServers)
         dns.matchDomains = [""]
         settings.dnsSettings = dns
-        if SecureDNSConfiguration.isActive(tunnelSettings) {
-            SharedLogger.shared.logRaw(
-                "TUNNEL_DNS_ADVERTISED",
-                detail: "servers=\(dnsServers.joined(separator: ",")) mode=\(tunnelSettings.secureDNSMode.rawValue) provider=\(tunnelSettings.secureDNSProvider.rawValue) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled)"
-            )
-        }
+        SharedLogger.shared.logRaw(
+            "TUNNEL_DNS_ADVERTISED",
+            detail: "servers=\(dnsServers.joined(separator: ",")) mode=\(tunnelSettings.secureDNSMode.rawValue) provider=\(tunnelSettings.secureDNSProvider.rawValue) messaging_compat=\(appSettings.messagingAppsCompatibilityModeEnabled) active=\(SecureDNSConfiguration.isActive(tunnelSettings))"
+        )
         MessagingAppsDiagnostics.logCompatibilityStartup(
             settings: appSettings,
             excludedRoutes: excludedBypassRoutes,

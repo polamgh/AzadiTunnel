@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shown once on first install before splash and onboarding.
+/// Shown once on first install before onboarding.
 struct LanguageSelectionView: View {
     @Environment(\.colorScheme) private var colorScheme
     let onFinish: () -> Void

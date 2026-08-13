@@ -185,7 +185,6 @@ final class AppLanguageController: ObservableObject {
         case privacyNoticeReviewExport
         case privacyNoticeStoreKit
         case supportButton
-        case splashTagline
         case diagnosticsSection
         case vpnPing
         case refreshPing

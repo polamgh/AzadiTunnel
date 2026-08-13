@@ -1,19 +1,24 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Local Firebase config template.
+  Copy to GoogleService-Info.plist and fill values from the Firebase console.
+  Never commit the real GoogleService-Info.plist (it is gitignored).
+-->
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyD5bvLChSRxjzq8UJFteuYR1D9XaI8ow6A</string>
+	<string>REPLACE_WITH_FIREBASE_IOS_API_KEY</string>
 	<key>GCM_SENDER_ID</key>
-	<string>256286425555</string>
+	<string>REPLACE_WITH_GCM_SENDER_ID</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>com.polamgh.ali.AzadiTunnel</string>
 	<key>PROJECT_ID</key>
-	<string>azadi-tunnel-ios</string>
+	<string>REPLACE_WITH_PROJECT_ID</string>
 	<key>STORAGE_BUCKET</key>
-	<string>azadi-tunnel-ios.firebasestorage.app</string>
+	<string>REPLACE_WITH_STORAGE_BUCKET</string>
 	<key>IS_ADS_ENABLED</key>
 	<false></false>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,6 +30,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:256286425555:ios:2d4749b4c83348fae9af26</string>
+	<string>REPLACE_WITH_GOOGLE_APP_ID</string>
 </dict>
 </plist>

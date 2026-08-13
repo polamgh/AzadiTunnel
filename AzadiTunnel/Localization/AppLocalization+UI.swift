@@ -7,7 +7,6 @@ enum AppLocalizationUI {
 
     private static let en: [AppLanguageController.L10nKey: String] = [
         .supportButton: "Support",
-        .splashTagline: "Privacy-focused tunnel for a more open internet",
         .diagnosticsSection: "Connection diagnostics",
         .vpnPing: "Ping",
         .refreshPing: "Refresh ping",
@@ -395,7 +394,6 @@ enum AppLocalizationUI {
 
     private static let fa: [AppLanguageController.L10nKey: String] = [
         .supportButton: "حمایت",
-        .splashTagline: "تونل متمرکز بر حریم خصوصی برای اینترنت بازتر",
         .diagnosticsSection: "تشخیص اتصال",
         .vpnPing: "پینگ",
         .refreshPing: "بازخوانی پینگ",

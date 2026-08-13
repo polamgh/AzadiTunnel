@@ -14,6 +14,9 @@ xcuserdata/
 .env
 .env.*
 
+# Firebase / Analytics — never commit real project keys (open-source repo)
+AzadiTunnel/GoogleService-Info.plist
+
 # Local Psiphon configs (secrets) — never commit
 Tests/Fixtures/local-*.json
 AzadiTunnel/Resources/Bundled/psiphon-config.local.json

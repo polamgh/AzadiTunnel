@@ -118,7 +118,7 @@ final class AzadiTunnelLegalTests: XCTestCase {
 
     private func launchApp(extraArgs: [String], forceBootstrap: Bool = true) -> XCUIApplication {
         let app = XCUIApplication()
-        var args = ["-UITestMode", "-UITestSkipSplash"]
+        var args = ["-UITestMode"]
         if forceBootstrap {
             args.append("-UITestForceBootstrap")
         }

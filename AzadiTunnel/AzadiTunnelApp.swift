@@ -7,8 +7,9 @@ struct AzadiTunnelApp: App {
     }
 
     @State private var showLanguagePicker = !isUITest && !SharedSettingsStore.shared.appSettings.hasChosenLanguage
-    @State private var showSplash = !isUITest && SharedSettingsStore.shared.appSettings.hasChosenLanguage
-    @State private var showOnboarding = false
+    @State private var showOnboarding = !isUITest
+        && SharedSettingsStore.shared.appSettings.hasChosenLanguage
+        && !SharedSettingsStore.shared.appSettings.hasCompletedOnboarding
     @StateObject private var languageController = AppLanguageController.shared
 
     init() {
@@ -117,33 +118,22 @@ struct AzadiTunnelApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                ContentView()
-                if showSplash {
-                    SplashView {
-                        showSplash = false
-                        showOnboarding = !SharedSettingsStore.shared.appSettings.hasCompletedOnboarding
-                            && !ProcessInfo.processInfo.arguments.contains("-UITestMode")
-                    }
-                    .transition(.opacity)
-                    .zIndex(1)
+            ContentView()
+                .background {
+                    AccessibilityLanguageBridge(language: languageController.accessibilityLanguage)
+                        .frame(width: 0, height: 0)
                 }
-            }
-            .background {
-                AccessibilityLanguageBridge(language: languageController.accessibilityLanguage)
-                    .frame(width: 0, height: 0)
-            }
-            .fullScreenCover(isPresented: $showLanguagePicker) {
-                LanguageSelectionView {
-                    showLanguagePicker = false
-                    if !Self.isUITest {
-                        showSplash = true
+                .fullScreenCover(isPresented: $showLanguagePicker) {
+                    LanguageSelectionView {
+                        showLanguagePicker = false
+                        if !Self.isUITest {
+                            showOnboarding = !SharedSettingsStore.shared.appSettings.hasCompletedOnboarding
+                        }
                     }
                 }
-            }
-            .fullScreenCover(isPresented: $showOnboarding) {
-                OnboardingView { showOnboarding = false }
-            }
+                .fullScreenCover(isPresented: $showOnboarding) {
+                    OnboardingView { showOnboarding = false }
+                }
         }
     }
 

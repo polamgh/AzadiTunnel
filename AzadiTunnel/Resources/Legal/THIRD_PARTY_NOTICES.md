@@ -19,6 +19,13 @@ This file lists third-party software used by AzadiTunnel.
 - **Packet mode adaptation:** `Tooling/psiphon/patches/packet-tunnel-callback.patch` adds the public raw-packet callback used by the Network Extension.
 - **Source offer:** Same repository as AzadiTunnel plus tunnel-core source at the pinned revision.
 
+## Grand Hotel font
+
+- **Author:** Brian J. Bonislawsky and Jim Lyles (Astigmatic)
+- **Source:** https://github.com/google/fonts/tree/main/ofl/grandhotel
+- **License:** SIL Open Font License 1.1 (full text: `AzadiTunnel/Resources/Fonts/GrandHotel-OFL.txt`)
+- **Use:** Dashboard "AzadiTunnel" wordmark. Bundled unmodified.
+
 ## Apple system frameworks
 
 - NetworkExtension, Network, SwiftUI — Apple SDK license terms apply.

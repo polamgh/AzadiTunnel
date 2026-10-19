@@ -187,6 +187,43 @@ final class AppLanguageController: ObservableObject {
         case supportButton
         case splashTagline
         case diagnosticsSection
+        case dashboardDetails
+        case dashboardHideDetails
+        case dashboardProtected
+        case dashboardUnprotected
+        case dashboardTotal
+        case regionPickerSubtitle
+        case regionBestSubtitle
+        case regionSearch
+        case regionNoResults
+        case regionGroupAmericas
+        case regionGroupEurope
+        case regionGroupAsia
+        case regionGroupOther
+        case settingsNetworkTools
+        case statsLiveSpeed
+        case statsLastTwoMinutes
+        case statsPeak
+        case statsSessionTime
+        case statsSessionData
+        case statsPeakSpeed
+        case statsAvgPing
+        case statsLatency
+        case statsMin
+        case statsAvg
+        case statsNow
+        case statsDailyUsage
+        case statsThisWeek
+        case statsConnections
+        case statsSuccessRate
+        case statsAvgConnect
+        case statsTotalSessions
+        case statsProtectedTime
+        case statsProtocols
+        case statsRecent
+        case statsFailed
+        case statsAllTime
+        case statsNoData
         case vpnPing
         case refreshPing
         case copy

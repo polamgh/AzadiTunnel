@@ -12,6 +12,7 @@ struct AzadiTunnelApp: App {
     @StateObject private var languageController = AppLanguageController.shared
 
     init() {
+        AppFonts.registerBundledFonts()
         AppLocalizationUI.register()
         // Firebase is initialized independently of VPN startup. If its config
         // is unavailable, the analytics service exits silently and connection

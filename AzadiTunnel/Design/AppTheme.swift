@@ -115,20 +115,6 @@ enum AppTheme {
     }
 }
 
-/// Thin Iran-flag stripe accent.
-struct IranFlagStripe: View {
-    var body: some View {
-        HStack(spacing: 0) {
-            AppTheme.iranGreen
-            AppTheme.iranWhite
-            AppTheme.iranRed
-        }
-        .frame(height: 4)
-        .clipShape(Capsule())
-        .accessibilityHidden(true)
-    }
-}
-
 struct GlassCard<Content: View>: View {
     @Environment(\.colorScheme) private var colorScheme
     var elevated = false

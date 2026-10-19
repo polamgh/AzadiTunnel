@@ -12,11 +12,21 @@ struct SettingsView: View {
     @State private var toastMessage = ""
     @State private var toastHideTask: Task<Void, Never>?
     @State private var showResetDefaultsConfirm = false
+    @State private var showRegionPicker = false
 
     var body: some View {
         ZStack {
             NavigationView {
             Form {
+                Section {
+                    SettingsHeroCard(
+                        protocolName: SettingsLabels.protocolName(settings.protocolSelection),
+                        regionName: settings.egressRegion.isEmpty
+                            ? L10n.t(.regionAny)
+                            : RegionDisplayNames.pickerLabel(for: settings.egressRegion, locale: lang.locale)
+                    )
+                }
+                .listRowBackground(SettingsRowBackground())
                 connectionSection
                 regionSection
                 protocolSection
@@ -25,9 +35,7 @@ struct SettingsView: View {
                 }
                 proxySection
                 proxyOnlySection
-                shareProxySection
-                bypassSection
-                secureDnsSection
+                networkToolsSection
                 behaviorSection
                 advancedSection
                 logsSection
@@ -42,6 +50,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle(L10n.t(.settingsTitle))
+            .settingsScrollBackgroundHidden()
+            .background(SettingsSurface())
+            .tint(AppTheme.iranGreenBright)
             .id(lang.revision)
             .accessibilityIdentifier("settingsScreen")
             .fileImporter(
@@ -52,6 +63,12 @@ struct SettingsView: View {
                 handleImport(result)
             }
             .onAppear { refresh() }
+            .sheet(isPresented: $showRegionPicker) {
+                RegionPickerSheet(selectedCode: settings.egressRegion) { code in
+                    settings.egressRegion = code
+                    persist("egress_region")
+                }
+            }
             }
             .navigationViewStyle(StackNavigationViewStyle())
 
@@ -77,9 +94,9 @@ struct SettingsView: View {
     }
 
     private var connectionSection: some View {
-        Section(L10n.t(.settingsConnection)) {
+        Section {
             HStack {
-                Text(L10n.t(.settingsConfigSource))
+                SettingsRowLabel(icon: "doc.badge.gearshape", tint: .gray, title: L10n.t(.settingsConfigSource))
                 Spacer()
                 Text(usesBundled ? L10n.t(.settingsBundled) : L10n.t(.settingsCustom))
                     .foregroundStyle(.secondary)
@@ -88,38 +105,57 @@ struct SettingsView: View {
             .accessibilityLabel(Text(L10n.t(.settingsConfigSource)))
             .accessibilityValue(Text(usesBundled ? L10n.t(.settingsBundled) : L10n.t(.settingsCustom)))
             if entryLineCount > 0 {
-                Text("\(L10n.t(.settingsServerEntries)): \(entryLineCount)")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                HStack {
+                    SettingsRowLabel(icon: "server.rack", tint: .teal, title: L10n.t(.settingsServerEntries))
+                    Spacer()
+                    Text("\(entryLineCount)")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
             }
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsConnection), icon: "bolt.horizontal.fill")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var regionSection: some View {
-        Section(L10n.t(.settingsRegion)) {
-            Picker(L10n.t(.settingsEgressRegion), selection: $settings.egressRegion) {
-                Text(L10n.t(.regionAny)).tag("")
-                ForEach(PsiphonRegionList.all, id: \.self) { code in
-                    Text(RegionDisplayNames.pickerLabel(for: code)).tag(code)
+        Section {
+            Button {
+                showRegionPicker = true
+            } label: {
+                HStack {
+                    SettingsRowLabel(icon: "globe.europe.africa.fill", tint: .blue, title: L10n.t(.settingsEgressRegion))
+                    Spacer()
+                    Text(settings.egressRegion.isEmpty
+                         ? L10n.t(.regionAny)
+                         : RegionDisplayNames.pickerLabel(for: settings.egressRegion, locale: lang.locale))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.forward")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
                 }
             }
-            .onChange(of: settings.egressRegion) { _ in
-                persist("egress_region")
-            }
+            .buttonStyle(.plain)
             .accessibilityHint(Text(L10n.t(.settingsRegionHint)))
-            Text(L10n.t(.settingsRegionHint))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            SettingsFootnote(text: L10n.t(.settingsRegionHint))
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsRegion), icon: "mappin.and.ellipse")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var protocolSection: some View {
-        Section(L10n.t(.settingsTransport)) {
-            Picker(L10n.t(.settingsProtocol), selection: $settings.protocolSelection) {
+        Section {
+            Picker(selection: $settings.protocolSelection) {
                 ForEach(AppSettings.ProtocolSelection.allCases) { p in
                     Text(SettingsLabels.protocolName(p)).tag(p)
                         .disabled(p == .conduit && !conduitConnectAllowed)
                 }
+            } label: {
+                SettingsRowLabel(icon: "arrow.triangle.branch", tint: AppTheme.iranGreen, title: L10n.t(.settingsProtocol))
             }
             .onChange(of: settings.protocolSelection) { newValue in
                 if newValue == .conduit, !conduitConnectAllowed {
@@ -130,37 +166,44 @@ struct SettingsView: View {
             }
             .accessibilityHint(Text(protocolHelpText))
             if !conduitConnectAllowed {
-                Text(PsiphonDistributorKeys.conduitBlockedStatusLine)
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
+                SettingsFootnote(text: PsiphonDistributorKeys.conduitBlockedStatusLine, tint: .orange)
             }
-            Toggle(L10n.t(.settingsBeastMode), isOn: $settings.beastModeEnabled)
+            Toggle(isOn: $settings.beastModeEnabled) {
+                SettingsRowLabel(icon: "bolt.fill", tint: .orange, title: L10n.t(.settingsBeastMode))
+            }
                 .accessibilityIdentifier("beastModeToggle")
                 .onChange(of: settings.beastModeEnabled) { _ in persist("beast_mode") }
             if settings.protocolSelection == .conduit {
-                Picker(L10n.t(.settingsConduitMode), selection: $settings.conduitMode) {
+                Picker(selection: $settings.conduitMode) {
                     ForEach(AppSettings.ConduitMode.allCases) { mode in
                         Text(SettingsLabels.conduitModeName(mode)).tag(mode)
                     }
+                } label: {
+                    SettingsRowLabel(icon: "point.3.connected.trianglepath.dotted", tint: .purple, title: L10n.t(.settingsConduitMode))
                 }
                 .onChange(of: settings.conduitMode) { _ in
                     settings.conduitFallbackToPublic = false
                     persist("conduit_mode")
                 }
-                Toggle(L10n.t(.settingsBlockCensored), isOn: $settings.rejectCensoredCountryProxies)
+                Toggle(isOn: $settings.rejectCensoredCountryProxies) {
+                    SettingsRowLabel(icon: "hand.raised.fill", tint: .red, title: L10n.t(.settingsBlockCensored))
+                }
                     .onChange(of: settings.rejectCensoredCountryProxies) { _ in persist("conduit_reject_countries") }
-                Picker(L10n.t(.settingsConduitTimeout), selection: $settings.conduitTimeoutSeconds) {
+                Picker(selection: $settings.conduitTimeoutSeconds) {
                     Text("2 min").tag(120)
                     Text("3 min").tag(180)
                     Text("5 min").tag(300)
                     Text("10 min").tag(600)
+                } label: {
+                    SettingsRowLabel(icon: "timer", tint: .teal, title: L10n.t(.settingsConduitTimeout))
                 }
                 .onChange(of: settings.conduitTimeoutSeconds) { _ in persist("conduit_timeout") }
             }
-            Text(protocolHelpText)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            SettingsFootnote(text: protocolHelpText)
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsTransport), icon: "point.topleft.down.curvedto.point.bottomright.up")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var conduitConnectAllowed: Bool {
@@ -193,11 +236,11 @@ struct SettingsView: View {
     }
 
     private var cdnFrontingSection: some View {
-        Section(L10n.t(.settingsCDNFronting)) {
-            Text(L10n.t(.settingsCDNExpert))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Toggle(L10n.t(.settingsCDNBuiltinScan), isOn: $settings.cdnFrontingUseBuiltInScan)
+        Section {
+            SettingsFootnote(text: L10n.t(.settingsCDNExpert))
+            Toggle(isOn: $settings.cdnFrontingUseBuiltInScan) {
+                SettingsRowLabel(icon: "dot.radiowaves.left.and.right", tint: .indigo, title: L10n.t(.settingsCDNBuiltinScan))
+            }
                 .onChange(of: settings.cdnFrontingUseBuiltInScan) { _ in persist("cdn_builtin_scan") }
             TextField(L10n.t(.settingsCDNEdgeIPs), text: $settings.cdnFrontingCustomIpList)
                 .lineLimit(8)
@@ -214,12 +257,17 @@ struct SettingsView: View {
             Text(cdnFrontingSummary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsCDNFronting), icon: "cloud.fill")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var proxySection: some View {
-        Section(L10n.t(.settingsProxy)) {
-            Toggle(L10n.t(.settingsProxyEnable), isOn: $settings.upstreamProxyEnabled)
+        Section {
+            Toggle(isOn: $settings.upstreamProxyEnabled) {
+                SettingsRowLabel(icon: "network", tint: .blue, title: L10n.t(.settingsProxyEnable))
+            }
                 .onChange(of: settings.upstreamProxyEnabled) { _ in persist("upstream_proxy_enabled") }
             if settings.upstreamProxyEnabled {
                 TextField(L10n.t(.settingsProxyHost), text: $settings.upstreamProxyHost)
@@ -229,19 +277,24 @@ struct SettingsView: View {
                     .onChange(of: settings.upstreamProxyHost) { _ in persist("upstream_proxy_host") }
                 Stepper("\(L10n.t(.settingsProxyPort)): \(settings.upstreamProxyPort)", value: $settings.upstreamProxyPort, in: 1...65535)
                     .onChange(of: settings.upstreamProxyPort) { _ in persist("upstream_proxy_port") }
-                Toggle(L10n.t(.settingsProxySystem), isOn: $settings.upstreamProxyUseSystem)
+                Toggle(isOn: $settings.upstreamProxyUseSystem) {
+                    SettingsRowLabel(icon: "gearshape.2.fill", tint: .gray, title: L10n.t(.settingsProxySystem))
+                }
                     .onChange(of: settings.upstreamProxyUseSystem) { _ in persist("upstream_proxy_system") }
                 SecureField(L10n.t(.settingsProxyUsername), text: $settings.upstreamProxyUsername)
                     .accessibilityLabel(Text(L10n.t(.settingsProxyUsername)))
                 SecureField(L10n.t(.settingsProxyPassword), text: $settings.upstreamProxyPassword)
                     .accessibilityLabel(Text(L10n.t(.settingsProxyPassword)))
             }
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsProxy), icon: "arrow.left.arrow.right")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var proxyOnlySection: some View {
         Section {
-            Toggle(L10n.t(.proxyOnlyEnableTitle), isOn: Binding(
+            Toggle(isOn: Binding(
                 get: { settings.proxyOnlyModeEnabled },
                 set: { newValue in
                     settings.proxyOnlyModeEnabled = newValue
@@ -252,28 +305,27 @@ struct SettingsView: View {
                     }
                     Task { await reconnectIfConnected() }
                 }
-            ))
+            )) {
+                SettingsRowLabel(icon: "arrow.left.arrow.right.circle.fill", tint: .orange, title: L10n.t(.proxyOnlyEnableTitle))
+            }
             .accessibilityIdentifier("proxyOnlySettingsToggle")
-            Text(L10n.t(.proxyOnlyEnableDescription))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text(L10n.t(.proxyOnlyWarningShort))
-                .font(.footnote)
-                .foregroundStyle(.orange)
+            SettingsFootnote(text: L10n.t(.proxyOnlyEnableDescription))
+            SettingsFootnote(text: L10n.t(.proxyOnlyWarningShort), tint: .orange)
             NavigationLink {
                 ProxyOnlySettingsView()
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t(.proxyOnlyRowTitle))
-                    Text(L10n.t(.proxyOnlyConfiguredAppsHint))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-                .accessibilityElement(children: .combine)
+                SettingsRowLabel(
+                    icon: "apps.iphone",
+                    tint: .orange,
+                    title: L10n.t(.proxyOnlyRowTitle),
+                    subtitle: L10n.t(.proxyOnlyConfiguredAppsHint)
+                )
             }
             .accessibilityIdentifier("proxyOnlySettingsLink")
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.proxyOnlyEnableTitle), icon: "rectangle.connected.to.line.below")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private func reconnectIfConnected() async {
@@ -283,38 +335,47 @@ struct SettingsView: View {
         await VPNController.shared.connect()
     }
 
-    private var shareProxySection: some View {
+
+
+    private var networkToolsSection: some View {
         Section {
             NavigationLink {
                 ShareProxyView()
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t(.shareProxyRowTitle))
-                    Text(L10n.t(.shareProxyRowSubtitle))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
+                SettingsRowLabel(
+                    icon: "antenna.radiowaves.left.and.right",
+                    tint: AppTheme.iranGreen,
+                    title: L10n.t(.shareProxyRowTitle),
+                    subtitle: L10n.t(.shareProxyRowSubtitle)
+                )
             }
             .accessibilityIdentifier("shareProxyRow")
-        }
-    }
-
-    private var bypassSection: some View {
-        Section {
             NavigationLink {
                 BypassIranView()
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t(.bypassRowTitle))
-                    Text(L10n.t(.bypassRowSubtitle))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
+                SettingsRowLabel(
+                    icon: "arrow.triangle.turn.up.right.diamond.fill",
+                    tint: .teal,
+                    title: L10n.t(.bypassRowTitle),
+                    subtitle: L10n.t(.bypassRowSubtitle)
+                )
             }
             .accessibilityIdentifier("bypassIranRow")
+            NavigationLink {
+                SecureDNSSettingsView()
+            } label: {
+                SettingsRowLabel(
+                    icon: "lock.shield.fill",
+                    tint: .indigo,
+                    title: L10n.t(.secureDnsRowTitle),
+                    subtitle: L10n.t(.secureDnsRowSubtitle)
+                )
+            }
+            .accessibilityIdentifier("secureDnsRow")
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsNetworkTools), icon: "network.badge.shield.half.filled")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var transportSection: some View {
@@ -324,135 +385,155 @@ struct SettingsView: View {
         }
     }
 
-    private var secureDnsSection: some View {
-        Section {
-            NavigationLink {
-                SecureDNSSettingsView()
-            } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(L10n.t(.secureDnsRowTitle))
-                    Text(L10n.t(.secureDnsRowSubtitle))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityElement(children: .combine)
-            }
-            .accessibilityIdentifier("secureDnsRow")
-        }
-    }
 
     private var behaviorSection: some View {
-        Section(L10n.t(.settingsBehavior)) {
-            Toggle(L10n.t(.settingsSmartFallback), isOn: $settings.smartFallbackChainEnabled)
+        Section {
+            Toggle(isOn: $settings.smartFallbackChainEnabled) {
+                SettingsRowLabel(icon: "arrow.triangle.2.circlepath", tint: AppTheme.iranGreen, title: L10n.t(.settingsSmartFallback))
+            }
                 .onChange(of: settings.smartFallbackChainEnabled) { _ in persist("smart_fallback_chain") }
-            Toggle(L10n.t(.settingsAutoRetryNoInternet), isOn: $settings.autoRetryOnNoInternet)
+            Toggle(isOn: $settings.autoRetryOnNoInternet) {
+                SettingsRowLabel(icon: "arrow.clockwise", tint: .blue, title: L10n.t(.settingsAutoRetryNoInternet))
+            }
                 .onChange(of: settings.autoRetryOnNoInternet) { _ in persist("auto_retry_no_internet") }
-            Text(L10n.t(.settingsAutoRetryNoInternetHelp))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Toggle(L10n.t(.settingsAutoReconnect), isOn: $settings.autoReconnect)
+            SettingsFootnote(text: L10n.t(.settingsAutoRetryNoInternetHelp))
+            Toggle(isOn: $settings.autoReconnect) {
+                SettingsRowLabel(icon: "link", tint: .teal, title: L10n.t(.settingsAutoReconnect))
+            }
                 .onChange(of: settings.autoReconnect) { _ in persist("auto_reconnect") }
-            Toggle(L10n.t(.settingsConnectOnLaunch), isOn: $settings.connectOnLaunch)
+            Toggle(isOn: $settings.connectOnLaunch) {
+                SettingsRowLabel(icon: "power", tint: AppTheme.iranRed, title: L10n.t(.settingsConnectOnLaunch))
+            }
                 .onChange(of: settings.connectOnLaunch) { _ in persist("connect_on_launch") }
-            Toggle(L10n.t(.settingsVPNOnDemand), isOn: $settings.vpnOnDemandEnabled)
+            Toggle(isOn: $settings.vpnOnDemandEnabled) {
+                SettingsRowLabel(icon: "bolt.horizontal.circle.fill", tint: .purple, title: L10n.t(.settingsVPNOnDemand))
+            }
                 .accessibilityIdentifier("vpnOnDemandToggle")
                 .onChange(of: settings.vpnOnDemandEnabled) { _ in
                     persist("vpn_on_demand_enabled")
                     Task { await VPNController.shared.applyOnDemandFromAppSettings() }
                 }
             if settings.vpnOnDemandEnabled {
-                Picker(L10n.t(.settingsVPNOnDemandMode), selection: $settings.vpnOnDemandMode) {
+                Picker(selection: $settings.vpnOnDemandMode) {
                     Text(L10n.t(.onDemandAlways)).tag(AppSettings.VPNOnDemandMode.always)
                     Text(L10n.t(.onDemandWiFi)).tag(AppSettings.VPNOnDemandMode.wifi)
                     Text(L10n.t(.onDemandCellular)).tag(AppSettings.VPNOnDemandMode.cellular)
+                } label: {
+                    SettingsRowLabel(icon: "wifi", tint: .blue, title: L10n.t(.settingsVPNOnDemandMode))
                 }
                 .onChange(of: settings.vpnOnDemandMode) { _ in
                     persist("vpn_on_demand_mode")
                     Task { await VPNController.shared.applyOnDemandFromAppSettings() }
                 }
-                Text(L10n.t(.settingsVPNOnDemandHelp))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                SettingsFootnote(text: L10n.t(.settingsVPNOnDemandHelp))
             }
-            Picker(L10n.t(.language), selection: $settings.preferredLanguage) {
+            Picker(selection: $settings.preferredLanguage) {
                 Text(L10n.t(.languageSystem)).tag(AppSettings.AppLanguage.system)
                 Text(L10n.t(.languageEnglish)).tag(AppSettings.AppLanguage.english)
                 Text(L10n.t(.languagePersian)).tag(AppSettings.AppLanguage.persian)
+            } label: {
+                SettingsRowLabel(icon: "character.bubble.fill", tint: .pink, title: L10n.t(.language))
             }
             .onChange(of: settings.preferredLanguage) { _ in
                 persist("language")
                 AppLanguageController.shared.reload()
             }
             .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsBehavior), icon: "slider.horizontal.3")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var advancedSection: some View {
-        Section(L10n.t(.settingsAdvanced)) {
-            Text(L10n.t(.settingsAdvancedHint))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Button(L10n.t(.settingsRetryBundled)) {
+        Section {
+            SettingsFootnote(text: L10n.t(.settingsAdvancedHint))
+            Button {
                 let ok = PsiphonBootstrap.installBundledConfigIfNeeded(force: true)
                 importError = ok ? nil : L10n.t(.settingsRetryBundledFailed)
                 refresh()
                 presentToast(ok ? L10n.t(.settingsBundledInstallSuccess) : L10n.t(.settingsRetryBundledFailed))
+            } label: {
+                SettingsRowLabel(icon: "arrow.down.circle.fill", tint: .blue, title: L10n.t(.settingsRetryBundled))
             }
             .accessibilityIdentifier("retry_bundled_install_button")
             .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
-            Button(L10n.t(.settingsImportConfig)) {
+            Button {
                 SharedLogger.shared.log(.configImportOpened)
                 showImporter = true
+            } label: {
+                SettingsRowLabel(icon: "square.and.arrow.down.fill", tint: .indigo, title: L10n.t(.settingsImportConfig))
             }
             .accessibilityIdentifier("import_config_button")
             .accessibilityHint(Text(L10n.t(.accessibilitySelect)))
-            Button(L10n.t(.settingsExportDebug)) {
+            Button {
                 DebugReportExporter.presentShareSheet(from: nil)
                 presentToast(L10n.t(.settingsDebugReportReady))
+            } label: {
+                SettingsRowLabel(icon: "ladybug.fill", tint: .orange, title: L10n.t(.settingsExportDebug))
             }
             .accessibilityIdentifier("export_debug_report_button")
-            Button(L10n.t(.settingsResetDefaults), role: .destructive) {
+            Button(role: .destructive) {
                 showResetDefaultsConfirm = true
+            } label: {
+                HStack(spacing: 12) {
+                    SettingsIconTile(systemName: "arrow.counterclockwise", tint: AppTheme.iranRed)
+                    Text(L10n.t(.settingsResetDefaults))
+                        .foregroundStyle(AppTheme.iranRed)
+                }
             }
             .accessibilityIdentifier("reset_settings_defaults_button")
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsAdvanced), icon: "wrench.and.screwdriver.fill")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var logsSection: some View {
-        Section(L10n.t(.settingsLogs)) {
+        Section {
             NavigationLink {
                 LogsView()
             } label: {
-                Text(L10n.t(.logsTitle))
+                SettingsRowLabel(icon: "list.bullet.rectangle.fill", tint: .gray, title: L10n.t(.logsTitle))
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("logsSettingsLink")
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsLogs), icon: "doc.text.magnifyingglass")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private var legalSection: some View {
-        Section(L10n.t(.settingsLegal)) {
+        Section {
             NavigationLink {
                 LegalOpenSourceView()
             } label: {
-                Text(L10n.t(.legalOpenSourceTitle))
-                    .accessibilityIdentifier("legalOpenSourceLink")
+                SettingsRowLabel(icon: "chevron.left.forwardslash.chevron.right", tint: .gray, title: L10n.t(.legalOpenSourceTitle))
             }
+            .accessibilityIdentifier("legalOpenSourceLink")
             NavigationLink {
                 PrivacyNoticeView()
             } label: {
-                Text(L10n.t(.privacyNoticeTitle))
-                    .accessibilityIdentifier("privacyNoticeLink")
+                SettingsRowLabel(icon: "hand.raised.fill", tint: .blue, title: L10n.t(.privacyNoticeTitle))
             }
-            NavigationLink(L10n.t(.settingsAbout)) { AboutView() }
-                .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
+            .accessibilityIdentifier("privacyNoticeLink")
+            NavigationLink {
+                AboutView()
+            } label: {
+                SettingsRowLabel(icon: "info.circle.fill", tint: .teal, title: L10n.t(.settingsAbout))
+            }
+            .accessibilityHint(Text(L10n.t(.accessibilityOpen)))
             NavigationLink {
                 SupportAzadiTunnelView()
             } label: {
-                Text(L10n.t(.settingsSupport))
-                    .accessibilityIdentifier("supportAzadiTunnelLink")
+                SettingsRowLabel(icon: "heart.fill", tint: AppTheme.iranRed, title: L10n.t(.settingsSupport))
             }
+            .accessibilityIdentifier("supportAzadiTunnelLink")
+        } header: {
+            SettingsSectionHeader(title: L10n.t(.settingsLegal), icon: "checkmark.seal.fill")
         }
+        .listRowBackground(SettingsRowBackground())
     }
 
     private func persist(_ key: String) {

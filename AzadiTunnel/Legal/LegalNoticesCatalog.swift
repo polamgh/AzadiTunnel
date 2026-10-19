@@ -42,6 +42,14 @@ enum LegalNoticesCatalog {
             sourceURL: "https://dev.maxmind.com/geoip/geolite2-free-geolocation-data",
             description: "Optional GeoIP database for Conduit country filtering when bundled.",
             licenseNeedsVerification: true // TODO: Confirm MaxMind attribution and redistribution terms.
+        ),
+        OpenSourceComponent(
+            id: "grand-hotel-font",
+            name: "Grand Hotel font (Astigmatic)",
+            license: "SIL Open Font License 1.1",
+            sourceURL: "https://github.com/google/fonts/tree/main/ofl/grandhotel",
+            description: "Typeface used for the AzadiTunnel wordmark.",
+            licenseNeedsVerification: false
         )
     ]
 

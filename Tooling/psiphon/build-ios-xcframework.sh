@@ -48,6 +48,11 @@ while read -r f; do
   sed -i '' 's/#import <netinet6\/in6.h>/#import <netinet\/in.h>/' "${f}"
 done < <(grep -rl 'netinet6/in6.h' "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel" 2>/dev/null || true)
 
+# Xcode 27+ rejects the upstream iOS 10.0 deployment target (minimum 15.0).
+# Match the app's own deployment target.
+sed -i '' 's/IPHONEOS_DEPLOYMENT_TARGET = [0-9.]*;/IPHONEOS_DEPLOYMENT_TARGET = 15.0;/' \
+  "${SRC_DIR}/MobileLibrary/iOS/PsiphonTunnel/PsiphonTunnel.xcodeproj/project.pbxproj"
+
 SYSTEM_GO="$(command -v go || true)"
 if [[ -z "${GOROOT:-}" && -n "${SYSTEM_GO}" ]]; then
   export GOROOT="$("${SYSTEM_GO}" env GOROOT)"

@@ -41,9 +41,12 @@ enum FallbackChainController {
         guard let policySelection = AdaptiveTransportPolicy.selection(for: selection.rawValue) else {
             return []
         }
+        // Psiphon rejects in-proxy (Conduit) dials when an upstream proxy is configured
+        // ("upstream proxy unsupported"), so that step could only burn budget.
         let candidates = AdaptiveTransportPolicy.candidates(
             for: policySelection,
             includePublicConduit: SharedSettingsStore.shared.conduitConnectAllowed
+                && !(effectiveSettings.upstreamProxyEnabled && !effectiveSettings.upstreamProxyHost.isEmpty)
         )
         let standardSteps = candidates.map { candidate in
             let timeout: TimeInterval
@@ -78,8 +81,15 @@ enum FallbackChainController {
         // A fixed edge can complete TLS/SSH and still fail Psiphon's activation handshake, as
         // seen on restrictive networks. Rotate the route strategy automatically instead of
         // requiring the user to toggle Region to perturb candidate ordering.
-        let dynamicTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 12)
-        let staticTimeout = min(max(1, effectiveSettings.fallbackTimeoutCDN), 18)
+        //
+        // Only the dynamic CDN probe runs first; the static variants run after Auto + Direct so a
+        // network where fronting fails still leaves Direct enough budget.
+        //
+        // Measured from an Iranian network, both the managed scan and the static edge overrides
+        // need ~18-21s to establish a FRONTED-MEEK-CDN tunnel, so each CDN step gets at least the
+        // minimum attempt budget (the former 12s/18s caps always expired first).
+        let dynamicTimeout = RecoveryTimingDefaults.minimumAttemptBudget
+        let staticTimeout = RecoveryTimingDefaults.minimumAttemptBudget
         let cdnSteps = [
             Step(
                 attemptID: "cdn_dynamic_tcp",
@@ -109,7 +119,10 @@ enum FallbackChainController {
                 cdnAttemptStrategy: .staticAll
             )
         ]
-        return cdnSteps + Array(standardSteps.dropFirst())
+        // Public Conduit stays the final candidate, after the static CDN variants.
+        let middleSteps = standardSteps.dropFirst().filter { $0.transport != .conduitPublic }
+        let conduitSteps = standardSteps.filter { $0.transport == .conduitPublic }
+        return [cdnSteps[0]] + middleSteps + Array(cdnSteps.dropFirst()) + conduitSteps
     }
 
     static func shouldUseChain(for selection: AppSettings.ProtocolSelection) -> Bool {
@@ -212,7 +225,9 @@ enum FallbackChainController {
                     return false
                 }
                 return await InternetConnectivityTest.waitForConnectedTunnel(
-                    timeoutSeconds: timeout,
+                    // The runner rejects the attempt at `timeout` unless a tunnel is
+                    // established, in which case it extends by the verify grace.
+                    timeoutSeconds: timeout + RecoveryTimingDefaults.establishedTunnelVerifyGrace,
                     budget: budget,
                     clock: budget.clock,
                     isCancellationRequested: {
@@ -233,6 +248,8 @@ enum FallbackChainController {
             isCancellationRequested: {
                 gate.isCancellationRequested(for: session)
             },
+            isTunnelEstablished: hasEstablishedTunnel,
+            verifyGraceGranted: logVerifyGrace,
             attemptStarted: { index, attempt in
                 guard let step = chainSteps.first(where: { $0.attemptID == attempt.id }) else { return }
                 state.currentStep = step.transport
@@ -294,6 +311,24 @@ enum FallbackChainController {
             vpn.setFallbackFailureMessage("Could not connect. Tried \(tried). See Logs for FALLBACK_* lines.")
             return false
         }
+    }
+
+    /// The extension records the connected protocol when Psiphon establishes a tunnel and
+    /// clears it on every new session or stop, so it is scoped to the current attempt.
+    static func hasEstablishedTunnel() -> Bool {
+        switch SharedSettingsStore.shared.vpnStatus {
+        case .connecting, .connected:
+            return !TunnelStatisticsStore.load().connectedTunnelProtocol.isEmpty
+        case .disconnected, .disconnecting, .error:
+            return false
+        }
+    }
+
+    static func logVerifyGrace(_ attempt: RecoveryAttemptRunner.Attempt, _ grace: TimeInterval) {
+        SharedLogger.shared.logRaw(
+            "FALLBACK_VERIFY_GRACE",
+            detail: "variant=\(attempt.id) protocol=\(TunnelStatisticsStore.load().connectedTunnelProtocol) grace_s=\(Int(grace))"
+        )
     }
 
     static func persistBestServerSelection(

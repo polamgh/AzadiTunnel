@@ -55,7 +55,7 @@ final class RecoveryTimingTests: XCTestCase {
         )
     }
 
-    func testExplicitCDNRotatesDynamicAndStaticRoutesBeforeOtherTransports() {
+    func testExplicitCDNProbesDynamicRouteThenAutoAndDirectBeforeStaticRoutes() {
         var settings = AppSettings()
         settings.protocolSelection = .cdnFronting
         settings.fallbackTimeoutCDN = 120
@@ -63,23 +63,43 @@ final class RecoveryTimingTests: XCTestCase {
         let steps = FallbackChainController.steps(for: .cdnFronting, settings: settings)
 
         XCTAssertGreaterThanOrEqual(steps.count, 5)
-        XCTAssertEqual(Array(steps.prefix(3).map(\.attemptID)), [
+        XCTAssertEqual(Array(steps.prefix(5).map(\.attemptID)), [
             "cdn_dynamic_tcp",
+            FallbackStep.autoBeast.rawValue,
+            FallbackStep.direct.rawValue,
             "cdn_static_tcp",
             "cdn_static_all"
         ])
-        XCTAssertEqual(Array(steps.prefix(3).map(\.transport)), [.cdn, .cdn, .cdn])
-        XCTAssertEqual(Array(steps.prefix(3).compactMap(\.cdnAttemptStrategy)), [
+        XCTAssertEqual(Array(steps.prefix(5).map(\.transport)), [.cdn, .autoBeast, .direct, .cdn, .cdn])
+        XCTAssertEqual(steps.compactMap(\.cdnAttemptStrategy), [
             .dynamicTCP,
             .staticTCP,
             .staticAll
         ])
-        XCTAssertEqual(steps[0].timeoutSeconds, 12)
-        XCTAssertEqual(steps[0].minimumTimeoutSeconds, 12)
-        XCTAssertEqual(steps[1].timeoutSeconds, 18)
-        XCTAssertEqual(steps[1].minimumTimeoutSeconds, 18)
-        XCTAssertEqual(steps[3].transport, .autoBeast)
-        XCTAssertEqual(steps[4].transport, .direct)
+        // Measured CDN establishment from Iran is ~18-21s; no CDN step may be capped below that.
+        XCTAssertEqual(steps[0].timeoutSeconds, RecoveryTimingDefaults.minimumAttemptBudget)
+        XCTAssertEqual(steps[0].minimumTimeoutSeconds, RecoveryTimingDefaults.minimumAttemptBudget)
+        XCTAssertEqual(steps[3].timeoutSeconds, RecoveryTimingDefaults.minimumAttemptBudget)
+        XCTAssertEqual(steps[3].minimumTimeoutSeconds, RecoveryTimingDefaults.minimumAttemptBudget)
+    }
+
+    func testPublicConduitIsLastAndSkippedBehindUpstreamProxy() {
+        var settings = AppSettings()
+        settings.protocolSelection = .cdnFronting
+
+        for selection in [AppSettings.ProtocolSelection.cdnFronting, .auto] {
+            let steps = FallbackChainController.steps(for: selection, settings: settings)
+            if let conduitIndex = steps.firstIndex(where: { $0.transport == .conduitPublic }) {
+                XCTAssertEqual(conduitIndex, steps.count - 1, "Conduit must be the final candidate")
+            }
+        }
+
+        settings.upstreamProxyEnabled = true
+        settings.upstreamProxyHost = "10.0.0.2"
+        for selection in [AppSettings.ProtocolSelection.cdnFronting, .auto] {
+            let steps = FallbackChainController.steps(for: selection, settings: settings)
+            XCTAssertFalse(steps.contains { $0.transport == .conduitPublic })
+        }
     }
 
     func testCDNRecoveryStrategiesComposeDistinctRoutesAndProtocolSets() throws {
@@ -291,6 +311,76 @@ final class RecoveryTimingTests: XCTestCase {
         XCTAssertEqual(restored, 1)
         XCTAssertEqual(persisted, [second])
         XCTAssertEqual(clock.value, 34, accuracy: 0.0001)
+    }
+
+    func testEstablishedTunnelGetsVerifyGraceBeforeAttemptIsRejected() async {
+        let clock = FakeClock()
+        let baseline = AppSettings()
+        var trial = baseline
+        trial.protocolSelection = .direct
+        var verifierTimeouts: [TimeInterval] = []
+        var graces: [TimeInterval] = []
+        var persisted = 0
+        let runner = RecoveryAttemptRunner(operations: .init(
+            applyTrial: { _ in },
+            restoreBaseline: { _ in },
+            disconnect: {},
+            connect: {},
+            verify: { _, timeout, _ in
+                verifierTimeouts.append(timeout)
+                try await Task.sleep(nanoseconds: 120_000_000_000)
+                return true
+            },
+            persistWinner: { _ in persisted += 1 },
+            isTunnelEstablished: { true },
+            verifyGraceGranted: { _, grace in graces.append(grace) }
+        ))
+
+        let result = await runner.run(
+            attempts: [attempt(id: "established", settings: trial)],
+            baseline: baseline,
+            budget: RecoveryBudget(duration: 120, clock: clock.clock)
+        )
+
+        if case .exhausted = result {
+            // Expected: the verifier never completes, even within the grace.
+        } else {
+            XCTFail("expected exhaustion after the grace window")
+        }
+        XCTAssertEqual(verifierTimeouts, [30])
+        XCTAssertEqual(graces, [RecoveryTimingDefaults.establishedTunnelVerifyGrace])
+        // Settle (2) + attempt (30) + grace (20) + settle after the timed-out disconnect (2).
+        XCTAssertEqual(clock.value, 54, accuracy: 0.0001)
+        XCTAssertEqual(persisted, 0)
+    }
+
+    func testVerifyGraceIsBoundedByOverallBudget() async {
+        let clock = FakeClock()
+        let baseline = AppSettings()
+        var graces: [TimeInterval] = []
+        let runner = RecoveryAttemptRunner(operations: .init(
+            applyTrial: { _ in },
+            restoreBaseline: { _ in },
+            disconnect: {},
+            connect: {},
+            verify: { _, _, _ in
+                try await Task.sleep(nanoseconds: 120_000_000_000)
+                return true
+            },
+            persistWinner: { _ in },
+            isTunnelEstablished: { true },
+            verifyGraceGranted: { _, grace in graces.append(grace) }
+        ))
+
+        _ = await runner.run(
+            attempts: [attempt(id: "late", settings: baseline)],
+            baseline: baseline,
+            budget: RecoveryBudget(duration: 40, clock: clock.clock)
+        )
+
+        XCTAssertEqual(graces.count, 1)
+        XCTAssertEqual(graces[0], 8, accuracy: 0.0001)
+        XCTAssertLessThanOrEqual(clock.value, 40.0001)
     }
 
     func testRecoverySessionGatePreventsOverlappingRuns() {

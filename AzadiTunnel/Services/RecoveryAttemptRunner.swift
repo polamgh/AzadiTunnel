@@ -82,6 +82,11 @@ struct RecoveryAttemptRunner {
         let verify: (Attempt, TimeInterval, RecoveryBudget) async throws -> Bool
         let persistWinner: (AppSettings) -> Void
         var isCancellationRequested: () -> Bool = { false }
+        /// True once the engine has an established tunnel for the current attempt.
+        /// An attempt whose deadline expires in this state gets a one-time grace
+        /// for the end-to-end probe instead of being torn down.
+        var isTunnelEstablished: () -> Bool = { false }
+        var verifyGraceGranted: (Attempt, TimeInterval) -> Void = { _, _ in }
 
         var attemptStarted: (Int, Attempt) -> Void = { _, _ in }
         var attemptFinished: (Int, Attempt, Bool) -> Void = { _, _, _ in }
@@ -261,6 +266,14 @@ struct RecoveryAttemptRunner {
                 do {
                     try await budget.sleep(timeout)
                     guard !Task.isCancelled else { return }
+                    if !race.isResolved, operations.isTunnelEstablished() {
+                        let grace = budget.bounded(RecoveryTimingDefaults.establishedTunnelVerifyGrace)
+                        if grace > 0 {
+                            operations.verifyGraceGranted(attempt, grace)
+                            try await budget.sleep(grace)
+                            guard !Task.isCancelled else { return }
+                        }
+                    }
                     race.resolve(.timedOut)
                 } catch {
                     // The timer is cancelled when the verifier wins.

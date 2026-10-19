@@ -24,7 +24,9 @@ enum AdaptiveTransportPolicy {
     /// Returns the ordered candidates for a user selection.
     ///
     /// Automatic selection starts with Auto + Beast (AggressiveEstablishment), then falls back to
-    /// explicit CDN fronting and Direct. Public Conduit is intentionally opt-in to this list and,
+    /// Direct and finally explicit CDN fronting, the slowest transport to establish (and the one
+    /// observed blocked on an Iranian network while Direct OSSH connected). Public Conduit is
+    /// intentionally opt-in to this list and,
     /// when available, is always the final candidate. Direct remains a single explicit choice.
     static func candidates(
         for selection: Selection,
@@ -61,7 +63,7 @@ enum AdaptiveTransportPolicy {
 
         switch selection {
         case .auto:
-            return [auto, cdn, direct] + (includePublicConduit ? [publicConduit] : [])
+            return [auto, direct, cdn] + (includePublicConduit ? [publicConduit] : [])
         case .cdnFronting:
             return [cdn, auto, direct] + (includePublicConduit ? [publicConduit] : [])
         case .direct:

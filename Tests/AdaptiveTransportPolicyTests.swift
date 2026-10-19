@@ -2,12 +2,12 @@ import XCTest
 @testable import AdaptiveTransportPolicy
 
 final class AdaptiveTransportPolicyTests: XCTestCase {
-    func testAutoStartsAggressiveThenCDNThenDirect() {
+    func testAutoStartsAggressiveThenDirectThenCDN() {
         let candidates = AdaptiveTransportPolicy.candidates(for: .auto)
 
         XCTAssertEqual(
             candidates.map(\.transport),
-            [.autoBeast, .cdn, .direct]
+            [.autoBeast, .direct, .cdn]
         )
         XCTAssertEqual(candidates.first?.selection, .auto)
         XCTAssertEqual(candidates.first?.beast, true)

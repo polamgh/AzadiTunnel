@@ -50,10 +50,15 @@ struct RecoveryBudget {
 enum RecoveryTimingDefaults {
     // Iranian mobile networks often need substantially longer for fronted TLS,
     // tactics, and broker negotiation than an unrestricted network. Preserve
-    // enough time for all four serial transports without overlapping engines.
-    nonisolated static let overallBudget: TimeInterval = 180
+    // enough time for all serial transports plus one established-tunnel grace
+    // without overlapping engines.
+    nonisolated static let overallBudget: TimeInterval = 210
     nonisolated static let perAttemptBudget: TimeInterval = 40
     nonisolated static let minimumAttemptBudget: TimeInterval = 30
+    // Once Psiphon reports an established tunnel, the extension still needs time
+    // for its end-to-end probe. Tested from an Iranian network: OSSH connected
+    // at 35s of a 40s attempt and was torn down before the probe could finish.
+    nonisolated static let establishedTunnelVerifyGrace: TimeInterval = 20
     nonisolated static let disconnectSettle: TimeInterval = 2.0
     nonisolated static let connectivityPoll: TimeInterval = 1
     nonisolated static let networkExtensionStopTimeout: TimeInterval = 15

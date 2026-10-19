@@ -67,7 +67,9 @@ enum NoInternetRecoveryController {
             },
             verify: { _, timeout, budget in
                 await InternetConnectivityTest.waitForConnectedTunnel(
-                    timeoutSeconds: timeout,
+                    // The runner rejects the attempt at `timeout` unless a tunnel is
+                    // established, in which case it extends by the verify grace.
+                    timeoutSeconds: timeout + RecoveryTimingDefaults.establishedTunnelVerifyGrace,
                     budget: budget,
                     clock: budget.clock,
                     isCancellationRequested: {
@@ -92,6 +94,8 @@ enum NoInternetRecoveryController {
             isCancellationRequested: {
                 gate.isCancellationRequested(for: session)
             },
+            isTunnelEstablished: FallbackChainController.hasEstablishedTunnel,
+            verifyGraceGranted: FallbackChainController.logVerifyGrace,
             attemptStarted: { index, attempt in
                 guard let plan = plans.first(where: { $0.attempt.id == attempt.id }) else { return }
                 state.attemptIndex = index

@@ -432,14 +432,17 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private func startStatsSampler() {
         statsTimer?.cancel()
         statsTimer = Task {
-            var lastDown: UInt64 = 0
-            var lastUp: UInt64 = 0
+            // Start from the current cumulative counters: they persist across sessions, so
+            // starting at zero reported the whole lifetime total as the first second's speed.
+            let initial = TunnelStatisticsStore.load()
+            var lastDown = initial.bytesDown
+            var lastUp = initial.bytesUp
             let tick: UInt64 = 1_000_000_000
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: tick)
                 let s = TunnelStatisticsStore.load()
-                let dDown = s.bytesDown &- lastDown
-                let dUp = s.bytesUp &- lastUp
+                let dDown = s.bytesDown >= lastDown ? s.bytesDown - lastDown : 0
+                let dUp = s.bytesUp >= lastUp ? s.bytesUp - lastUp : 0
                 lastDown = s.bytesDown
                 lastUp = s.bytesUp
                 TunnelStatisticsStore.updateSpeeds(downloadBps: dDown, uploadBps: dUp)

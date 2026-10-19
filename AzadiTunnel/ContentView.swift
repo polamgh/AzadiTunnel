@@ -16,6 +16,13 @@ struct ContentView: View {
                     .accessibilityIdentifier("vpnTab")
             }
 
+            StatisticsView()
+                .tabItem {
+                    Label(L10n.t(.tabStats), systemImage: "chart.xyaxis.line")
+                        .accessibilityLabel(Text(L10n.t(.tabStats)))
+                        .accessibilityIdentifier("statsTabBar")
+                }
+
             SettingsView()
                 .accessibilityIdentifier("settingsRootScreen")
                 .tabItem {
@@ -27,7 +34,10 @@ struct ContentView: View {
         .id(lang.revision)
         .environment(\.locale, lang.locale)
         .environment(\.layoutDirection, lang.layoutDirection == .rightToLeft ? .rightToLeft : .leftToRight)
-        .onAppear { runUITestHooksIfNeeded() }
+        .onAppear {
+            StatsHistoryStore.shared.start()
+            runUITestHooksIfNeeded()
+        }
     }
 
     private func runUITestHooksIfNeeded() {

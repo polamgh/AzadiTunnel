@@ -1,19 +1,17 @@
 import Foundation
 
 enum SecureDNSMode: String, Codable, CaseIterable, Identifiable {
-    case doh
-    /// Decoded only to migrate settings from versions that exposed a cleartext-capable toggle.
-    /// It is never offered or honored as a runtime mode.
-    @available(*, deprecated, message: "Secure DNS is mandatory; migrate to DoH")
+    /// Tunnel DNS uses Psiphon's native transparent DNS (no DoH interception).
     case off
-    /// Decoded for migration of pre-DoH-only settings. It is never offered or used as a
-    /// transport; ``SharedSettingsStore`` converts it to ``doh`` on the next read.
+    /// RFC 8484 DoH through the established Psiphon SOCKS proxy.
+    case doh
+    /// Decoded for migration of pre-DoH-only settings. Converted to ``doh`` on read.
     @available(*, deprecated, message: "DoT was replaced by RFC 8484 DoH")
     case dot
 
     var id: String { rawValue }
 
-    static var allCases: [SecureDNSMode] { [.doh] }
+    static var allCases: [SecureDNSMode] { [.off, .doh] }
 }
 
 enum SecureDNSProvider: String, Codable, CaseIterable, Identifiable {
@@ -37,16 +35,24 @@ enum SecureDNSConfiguration {
     }
 
     static func isActive(_ settings: AppSettings) -> Bool {
-        _ = settings
-        return true
+        switch settings.secureDNSMode {
+        case .doh, .dot:
+            return true
+        case .off:
+            return false
+        }
     }
 
     static func logStartupStatus(_ settings: AppSettings) {
-        switch settings.secureDNSMode {
-        case .doh, .off, .dot:
+        if isActive(settings) {
             SharedLogger.shared.log(
                 .secureDnsEnabled,
                 detail: "mode=doh provider=\(settings.secureDNSProvider.rawValue) transport=psiphon_socks"
+            )
+        } else {
+            SharedLogger.shared.logRaw(
+                "SECURE_DNS_DISABLED",
+                detail: "mode=off dns=psiphon_transparent"
             )
         }
     }
@@ -143,9 +149,8 @@ enum SecureDNSConfiguration {
 
     static func modeDisplayName(_ mode: SecureDNSMode) -> String {
         switch mode {
-        case .off: return "DoH"
-        case .doh: return "DoH"
-        case .dot: return "DoH"
+        case .off: return "Off"
+        case .doh, .dot: return "DoH"
         }
     }
 
@@ -156,11 +161,9 @@ enum SecureDNSConfiguration {
         0x00, 0x01, 0x00, 0x01
     ])
 
-    /// Virtual resolver shown to iOS. The Swift Secure DNS callback currently
-    /// parses IPv4 UDP packets, so keep the advertised resolver on IPv4 while
-    /// Psiphon's native packet transport handles all other IPv4/IPv6 traffic.
-    /// The core's IPv6 transparent-DNS address remains configured for packets
-    /// that reach it directly, but is intentionally not advertised here.
+    /// Virtual resolver shown to iOS. When Secure DNS is on, Swift intercepts
+    /// UDP/53 to this address for DoH. When off, Psiphon's transparent DNS
+    /// (`PacketTunnelTransparentDNSIPv4Address`) answers the same address.
     static func advertisedDnsServers(for settings: AppSettings) -> [String] {
         _ = settings
         return ["10.0.0.1"]

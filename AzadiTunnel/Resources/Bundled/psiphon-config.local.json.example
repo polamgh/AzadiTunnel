@@ -4,5 +4,6 @@
   "ExchangeObfuscationKey": "",
   "RemoteServerListURLs": [],
   "RemoteServerListSignaturePublicKey": "",
-  "ObfuscatedServerListRootURLs": []
+  "ObfuscatedServerListRootURLs": [],
+  "AdditionalParameters": ""
 }

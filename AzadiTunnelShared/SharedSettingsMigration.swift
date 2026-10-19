@@ -2,7 +2,7 @@ import Foundation
 
 /// Migrations applied when the App Group settings blob is read. Secure DNS migration is kept
 /// separate from messaging compatibility persistence so enabling one feature can never rewrite
-/// the other feature's explicit user choice.
+/// the other feature's explicit user choice (after the one-shot optional-default migration).
 enum SharedSettingsMigration {
     @discardableResult
     static func migrate(_ settings: inout AppSettings) -> Bool {
@@ -16,13 +16,12 @@ enum SharedSettingsMigration {
             settings.hasChosenLanguage = true
             didMigrate = true
         }
-        if settings.secureDNSMode != .doh {
-            settings.secureDNSMode = .doh
+        // One-shot for everyone upgrading from mandatory-DoH builds: force Off once.
+        // Afterwards the user can turn DoH back on and that choice is kept.
+        if !settings.hasMigratedSecureDNSOptionalDefault {
+            settings.secureDNSMode = .off
             settings.customDoTHost = ""
-            didMigrate = true
-        }
-        if !settings.blockCleartextDNS {
-            settings.blockCleartextDNS = true
+            settings.hasMigratedSecureDNSOptionalDefault = true
             didMigrate = true
         }
         return didMigrate

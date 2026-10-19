@@ -23,6 +23,10 @@ enum AppGroupConstants {
     static let testModeKey = "ui_test_mode"
     static let lastInternetTestOKKey = "last_internet_test_ok"
     static let psiphonTunnelEstablishedKey = "psiphon_tunnel_established"
+    /// Psiphon-reported egress region codes (`onAvailableEgressRegions`).
+    static let psiphonKnownEgressRegionsKey = "psiphon_known_egress_regions"
+    /// Set when the user's selected egress region is no longer offered by Psiphon.
+    static let egressRegionUnavailableKey = "egress_region_unavailable"
 
     /// Persisted runtime state for the LAN proxy bridge (written by extension, read by UI).
     static let lanProxyStatusKey = "lan_proxy_status"
@@ -41,7 +45,7 @@ enum AppGroupConstants {
     /// Route count the extension actually applied to `excludedRoutes` (published for UI).
     static let bypassRoutesAppliedCountKey = "bypass_routes_applied_count"
 
-    /// User-visible Secure DNS warning when the mandatory DoH resolver fails closed.
+    /// User-visible Secure DNS warning when the optional DoH resolver fails closed.
     static let secureDNSWarningKey = "secure_dns_warning"
     static let secureDNSCloudflareValidationKey = "secure_dns_cloudflare_validation"
 }

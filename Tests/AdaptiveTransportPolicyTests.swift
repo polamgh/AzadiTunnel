@@ -2,12 +2,12 @@ import XCTest
 @testable import AdaptiveTransportPolicy
 
 final class AdaptiveTransportPolicyTests: XCTestCase {
-    func testAutoStartsAggressiveThenDirectThenCDN() {
+    func testAutoStartsAggressiveThenCDNThenDirect() {
         let candidates = AdaptiveTransportPolicy.candidates(for: .auto)
 
         XCTAssertEqual(
             candidates.map(\.transport),
-            [.autoBeast, .direct, .cdn]
+            [.autoBeast, .cdn, .direct]
         )
         XCTAssertEqual(candidates.first?.selection, .auto)
         XCTAssertEqual(candidates.first?.beast, true)
@@ -38,6 +38,11 @@ final class AdaptiveTransportPolicyTests: XCTestCase {
     }
 
     func testStaticCDNOverridesAreScopedToExplicitCDN() {
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .auto))
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .direct))
+        XCTAssertTrue(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .cdnFronting))
+        XCTAssertFalse(AdaptiveTransportPolicy.includesCdnFrontingHints(for: .conduit))
+
         XCTAssertFalse(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .auto))
         XCTAssertFalse(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .direct))
         XCTAssertTrue(AdaptiveTransportPolicy.usesStaticCDNOverrides(for: .cdnFronting))

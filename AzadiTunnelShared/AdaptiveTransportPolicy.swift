@@ -24,9 +24,7 @@ enum AdaptiveTransportPolicy {
     /// Returns the ordered candidates for a user selection.
     ///
     /// Automatic selection starts with Auto + Beast (AggressiveEstablishment), then falls back to
-    /// Direct and finally explicit CDN fronting, the slowest transport to establish (and the one
-    /// observed blocked on an Iranian network while Direct OSSH connected). Public Conduit is
-    /// intentionally opt-in to this list and,
+    /// explicit CDN fronting and Direct. Public Conduit is intentionally opt-in to this list and,
     /// when available, is always the final candidate. Direct remains a single explicit choice.
     static func candidates(
         for selection: Selection,
@@ -63,13 +61,23 @@ enum AdaptiveTransportPolicy {
 
         switch selection {
         case .auto:
-            return [auto, direct, cdn] + (includePublicConduit ? [publicConduit] : [])
+            return [auto, cdn, direct] + (includePublicConduit ? [publicConduit] : [])
         case .cdnFronting:
             return [cdn, auto, direct] + (includePublicConduit ? [publicConduit] : [])
         case .direct:
             return [direct]
         case .conduit:
             return []
+        }
+    }
+
+    /// Shiro Android applies CDN fronting hints for auto, direct, and explicit CDN modes.
+    static func includesCdnFrontingHints(for selection: Selection) -> Bool {
+        switch selection {
+        case .auto, .direct, .cdnFronting:
+            return true
+        case .conduit:
+            return false
         }
     }
 
@@ -81,6 +89,11 @@ enum AdaptiveTransportPolicy {
     static func usesStaticCDNOverrides(for rawValue: String) -> Bool {
         guard let selection = selection(for: rawValue) else { return false }
         return usesStaticCDNOverrides(for: selection)
+    }
+
+    static func includesCdnFrontingHints(for rawValue: String) -> Bool {
+        guard let selection = selection(for: rawValue) else { return false }
+        return includesCdnFrontingHints(for: selection)
     }
 
     /// The app never disables Psiphon tactics for an adaptive transport attempt.

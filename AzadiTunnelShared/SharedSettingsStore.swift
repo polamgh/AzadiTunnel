@@ -152,6 +152,11 @@ final class SharedSettingsStore {
         }
     }
 
+    var egressRegionUnavailable: Bool {
+        get { defaults?.bool(forKey: AppGroupConstants.egressRegionUnavailableKey) ?? false }
+        set { defaults?.set(newValue, forKey: AppGroupConstants.egressRegionUnavailableKey) }
+    }
+
     var vpnStatus: VPNStatusDisplay {
         get {
             guard let raw = defaults?.string(forKey: AppGroupConstants.vpnStatusKey),

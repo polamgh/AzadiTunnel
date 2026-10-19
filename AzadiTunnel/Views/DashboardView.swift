@@ -1144,6 +1144,7 @@ struct DashboardView: View {
     private func updateEgressRegion(_ code: String) {
         var settings = SharedSettingsStore.shared.appSettings
         settings.egressRegion = code
+        SharedSettingsStore.shared.egressRegionUnavailable = false
         SharedSettingsStore.shared.updateAppSettings(settings, logKey: "dashboard_egress_region")
     }
 }

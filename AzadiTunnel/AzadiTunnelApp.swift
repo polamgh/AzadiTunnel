@@ -7,6 +7,8 @@ struct AzadiTunnelApp: App {
     }
 
     @State private var showLanguagePicker = !isUITest && !SharedSettingsStore.shared.appSettings.hasChosenLanguage
+    /// The static Launch Screen hands off to the animated splash, which then reveals
+    /// onboarding (when still pending) or the dashboard.
     @State private var showSplash = !isUITest && SharedSettingsStore.shared.appSettings.hasChosenLanguage
     @State private var showOnboarding = false
     @StateObject private var languageController = AppLanguageController.shared
@@ -73,10 +75,15 @@ struct AzadiTunnelApp: App {
                 settings.fallbackTimeoutDirect = 120
             }
             let secureDnsModeRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSMode")
-            if secureDnsModeRaw != nil {
-                // Legacy UI-test invocations may still pass "off" or "dot". They are accepted
-                // as input for migration coverage, but the runtime setting is always DoH.
-                settings.secureDNSMode = .doh
+            if let secureDnsModeRaw {
+                switch SecureDNSMode(rawValue: secureDnsModeRaw) {
+                case .off:
+                    settings.secureDNSMode = .off
+                case .doh, .dot:
+                    settings.secureDNSMode = .doh
+                case .none:
+                    settings.secureDNSMode = .doh
+                }
             }
             let secureDnsProviderRaw = Self.uiTestArgValue(args, flag: "-UITestSetSecureDNSProvider")
             if let secureDnsProviderRaw,
@@ -119,27 +126,26 @@ struct AzadiTunnelApp: App {
                     SplashView {
                         showSplash = false
                         showOnboarding = !SharedSettingsStore.shared.appSettings.hasCompletedOnboarding
-                            && !ProcessInfo.processInfo.arguments.contains("-UITestMode")
                     }
                     .transition(.opacity)
                     .zIndex(1)
                 }
             }
-            .background {
-                AccessibilityLanguageBridge(language: languageController.accessibilityLanguage)
-                    .frame(width: 0, height: 0)
-            }
-            .fullScreenCover(isPresented: $showLanguagePicker) {
-                LanguageSelectionView {
-                    showLanguagePicker = false
-                    if !Self.isUITest {
-                        showSplash = true
+                .background {
+                    AccessibilityLanguageBridge(language: languageController.accessibilityLanguage)
+                        .frame(width: 0, height: 0)
+                }
+                .fullScreenCover(isPresented: $showLanguagePicker) {
+                    LanguageSelectionView {
+                        showLanguagePicker = false
+                        if !Self.isUITest {
+                            showOnboarding = !SharedSettingsStore.shared.appSettings.hasCompletedOnboarding
+                        }
                     }
                 }
-            }
-            .fullScreenCover(isPresented: $showOnboarding) {
-                OnboardingView { showOnboarding = false }
-            }
+                .fullScreenCover(isPresented: $showOnboarding) {
+                    OnboardingView { showOnboarding = false }
+                }
         }
     }
 

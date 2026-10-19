@@ -66,6 +66,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showRegionPicker) {
                 RegionPickerSheet(selectedCode: settings.egressRegion) { code in
                     settings.egressRegion = code
+                    SharedSettingsStore.shared.egressRegionUnavailable = false
                     persist("egress_region")
                 }
             }
@@ -591,7 +592,7 @@ struct SettingsView: View {
 }
 
 enum PsiphonRegionList {
-    static let all = ["US", "CA", "GB", "DE", "FR", "NL", "CH", "SE", "JP", "SG", "AU", "IR", "AE", "IN", "BR", "ZA"]
+    static var all: [String] { PsiphonEgressRegionStore.knownRegions() }
 }
 
 enum SettingsLabels {

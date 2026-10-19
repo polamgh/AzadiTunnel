@@ -48,16 +48,16 @@ struct RecoveryBudget {
 }
 
 enum RecoveryTimingDefaults {
-    // Iranian mobile networks often need substantially longer for fronted TLS,
-    // tactics, and broker negotiation than an unrestricted network. Preserve
-    // enough time for all serial transports plus one established-tunnel grace
-    // without overlapping engines.
-    nonisolated static let overallBudget: TimeInterval = 210
-    nonisolated static let perAttemptBudget: TimeInterval = 40
+    // Match Shiro Android: ~120s per transport step. Overall covers Auto → CDN →
+    // Direct (+ optional public Conduit) without cutting paths that still succeed
+    // on Android. Per-attempt timeout comes from AppSettings; this constant is
+    // only a documented default / test reference, not a hard runner ceiling.
+    nonisolated static let overallBudget: TimeInterval = 480
+    nonisolated static let perAttemptBudget: TimeInterval = 120
     nonisolated static let minimumAttemptBudget: TimeInterval = 30
     // Once Psiphon reports an established tunnel, the extension still needs time
-    // for its end-to-end probe. Tested from an Iranian network: OSSH connected
-    // at 35s of a 40s attempt and was torn down before the probe could finish.
+    // for its end-to-end probe. Seen from an Iranian network: OSSH connected
+    // seconds before an attempt deadline and was torn down before the probe ran.
     nonisolated static let establishedTunnelVerifyGrace: TimeInterval = 20
     nonisolated static let disconnectSettle: TimeInterval = 2.0
     nonisolated static let connectivityPoll: TimeInterval = 1

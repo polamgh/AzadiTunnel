@@ -246,16 +246,7 @@ struct DashboardView: View {
                 .foregroundStyle(isProtected ? AppTheme.success : AppTheme.secondaryText(for: colorScheme))
                 .accessibilityHidden(true)
             if isProtected {
-                if let origin = VPNWorldMapBackground.flagEmoji(for: originCountryCode) {
-                    Text(origin).accessibilityHidden(true)
-                    Image(systemName: "arrow.forward")
-                        .font(.caption2.weight(.bold))
-                        .foregroundStyle(AppTheme.secondaryText(for: colorScheme))
-                        .accessibilityHidden(true)
-                }
-                if let destination = VPNWorldMapBackground.flagEmoji(for: destinationCountryCode) {
-                    Text(destination).accessibilityHidden(true)
-                }
+                // Connected: the map labels already show both flags, so the caption stays text-only.
                 Text(regionSubtitle ?? L10n.t(.dashboardProtected))
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(AppTheme.primaryText(for: colorScheme))

@@ -41,3 +41,6 @@ build/
 
 # Swift Package Manager build artifacts
 .build/
+
+# macOS Finder metadata
+.DS_Store
